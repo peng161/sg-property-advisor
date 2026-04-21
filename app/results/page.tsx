@@ -1,4 +1,6 @@
 import { assess } from "@/lib/calculator";
+import { fetchHdbPrices } from "@/lib/fetchHdb";
+import { fetchPrivatePrices } from "@/lib/fetchPrivate";
 import Link from "next/link";
 
 const RECOMMENDATION_STYLE: Record<string, { bg: string; text: string; icon: string }> = {
@@ -24,12 +26,19 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     wifeIncome:     Number(params.wifeIncome ?? 0),
   };
 
-  const result = assess(input);
+  // Fetch live data in parallel; each falls back to null on failure
+  const [hdb, privatePrices] = await Promise.all([
+    fetchHdbPrices(input.town),
+    fetchPrivatePrices(),
+  ]);
+
+  const result = assess(input, { hdb, private: privatePrices });
   const rec = RECOMMENDATION_STYLE[result.recommendation];
 
   return (
     <main className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-lg mx-auto space-y-6">
+
         {/* Header */}
         <div>
           <Link href="/assessment" className="text-sm text-blue-600 hover:underline">
@@ -39,6 +48,24 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           <p className="text-gray-500 mt-1">
             Based on your {input.flatType} in {input.town}
           </p>
+
+          {/* Data source badges */}
+          <div className="flex gap-2 mt-2 flex-wrap">
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+              result.dataSource.hdb === "live"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-500"
+            }`}>
+              HDB: {result.dataSource.hdb === "live" ? "🟢 Live (data.gov.sg)" : "⚪ Sample data"}
+            </span>
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+              result.dataSource.private === "live"
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-500"
+            }`}>
+              Private: {result.dataSource.private === "live" ? "🟢 Live (URA)" : "⚪ Sample data"}
+            </span>
+          </div>
         </div>
 
         {/* Top recommendation */}
@@ -57,11 +84,11 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           <h3 className="font-semibold text-gray-800 mb-4">📊 Your Financial Snapshot</h3>
           <div className="space-y-3">
             {[
-              { label: "Combined monthly income", value: `S$${result.combinedIncome.toLocaleString("en-SG")}` },
+              { label: "Combined monthly income",    value: `S$${result.combinedIncome.toLocaleString("en-SG")}` },
               { label: "Est. cash proceeds from sale", value: `S$${result.cashProceeds.toLocaleString("en-SG")}` },
-              { label: "Max HDB loan (MSR 30%)", value: `S$${result.maxHdbLoan.toLocaleString("en-SG")}` },
-              { label: "Max bank loan (TDSR 55%)", value: `S$${result.maxBankLoan.toLocaleString("en-SG")}` },
-              { label: "Total HDB upgrade budget", value: `S$${result.hdbBudget.toLocaleString("en-SG")}`, highlight: true },
+              { label: "Max HDB loan (MSR 30%)",     value: `S$${result.maxHdbLoan.toLocaleString("en-SG")}` },
+              { label: "Max bank loan (TDSR 55%)",   value: `S$${result.maxBankLoan.toLocaleString("en-SG")}` },
+              { label: "Total HDB upgrade budget",   value: `S$${result.hdbBudget.toLocaleString("en-SG")}`,    highlight: true },
               { label: "Total private upgrade budget", value: `S$${result.privateBudget.toLocaleString("en-SG")}`, highlight: true },
             ].map((row) => (
               <div key={row.label} className="flex justify-between items-center text-sm">
@@ -91,13 +118,11 @@ export default async function ResultsPage({ searchParams }: PageProps) {
             >
               <div className="flex items-center justify-between mb-2">
                 <h4 className="font-semibold text-gray-900">{option.label}</h4>
-                <span
-                  className={`text-xs font-medium px-2 py-1 rounded-full ${
-                    option.affordable
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-600"
-                  }`}
-                >
+                <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                  option.affordable
+                    ? "bg-green-100 text-green-700"
+                    : "bg-red-100 text-red-600"
+                }`}>
                   {option.affordable ? "✓ Affordable" : "✗ Out of range"}
                 </span>
               </div>
@@ -110,12 +135,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           ))}
         </section>
 
-        {/* Restart */}
         <div className="text-center pt-2 pb-8">
-          <Link
-            href="/"
-            className="text-sm text-gray-400 hover:text-gray-600 underline"
-          >
+          <Link href="/" className="text-sm text-gray-400 hover:text-gray-600 underline">
             Start over
           </Link>
         </div>

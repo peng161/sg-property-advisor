@@ -14,9 +14,22 @@ const HDB_TOWNS = [
 
 const FLAT_TYPES = ["3-Room", "4-Room", "5-Room", "Executive"];
 
+// Strip commas and return raw number string
+function rawNumber(value: string): string {
+  return value.replace(/,/g, "");
+}
+
+// Format a digit string with thousands commas
+function addCommas(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  return Number(digits).toLocaleString("en-SG");
+}
+
 export default function AssessmentPage() {
   const router = useRouter();
 
+  // All money fields stored as display strings (with commas)
   const [form, setForm] = useState({
     flatType: "",
     town: "",
@@ -28,8 +41,14 @@ export default function AssessmentPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+  function handleSelect(e: React.ChangeEvent<HTMLSelectElement>) {
     setForm({ ...form, [e.target.name]: e.target.value });
+    setErrors({ ...errors, [e.target.name]: "" });
+  }
+
+  function handleMoney(e: React.ChangeEvent<HTMLInputElement>) {
+    const formatted = addCommas(e.target.value);
+    setForm({ ...form, [e.target.name]: formatted });
     setErrors({ ...errors, [e.target.name]: "" });
   }
 
@@ -37,9 +56,9 @@ export default function AssessmentPage() {
     const newErrors: Record<string, string> = {};
     if (!form.flatType) newErrors.flatType = "Please select a flat type";
     if (!form.town) newErrors.town = "Please select your town";
-    if (!form.estimatedValue || Number(form.estimatedValue) <= 0)
+    if (!form.estimatedValue || Number(rawNumber(form.estimatedValue)) <= 0)
       newErrors.estimatedValue = "Enter a valid estimated value";
-    if (!form.myIncome || Number(form.myIncome) <= 0)
+    if (!form.myIncome || Number(rawNumber(form.myIncome)) <= 0)
       newErrors.myIncome = "Enter your monthly income";
     return newErrors;
   }
@@ -54,24 +73,27 @@ export default function AssessmentPage() {
     const params = new URLSearchParams({
       flatType: form.flatType,
       town: form.town,
-      estimatedValue: form.estimatedValue,
-      remainingLoan: form.remainingLoan || "0",
-      myIncome: form.myIncome,
-      wifeIncome: form.wifeIncome || "0",
+      estimatedValue: rawNumber(form.estimatedValue),
+      remainingLoan: rawNumber(form.remainingLoan) || "0",
+      myIncome: rawNumber(form.myIncome),
+      wifeIncome: rawNumber(form.wifeIncome) || "0",
     });
     router.push(`/results?${params.toString()}`);
   }
+
+  const combinedIncome =
+    (Number(rawNumber(form.myIncome)) || 0) +
+    (Number(rawNumber(form.wifeIncome)) || 0);
+
+  const inputClass =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   return (
     <main className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-lg mx-auto">
         <div className="mb-8">
-          <a href="/" className="text-sm text-blue-600 hover:underline">
-            ← Back
-          </a>
-          <h1 className="text-2xl font-bold text-gray-900 mt-3">
-            Your Property Details
-          </h1>
+          <a href="/" className="text-sm text-blue-600 hover:underline">← Back</a>
+          <h1 className="text-2xl font-bold text-gray-900 mt-3">Your Property Details</h1>
           <p className="text-gray-500 mt-1">
             Fill in your current situation — we&apos;ll crunch the numbers for you.
           </p>
@@ -83,37 +105,19 @@ export default function AssessmentPage() {
             <h2 className="font-semibold text-gray-800 text-lg">🏠 Current Flat</h2>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Flat Type
-              </label>
-              <select
-                name="flatType"
-                value={form.flatType}
-                onChange={handleChange}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
+              <label className="block text-sm font-medium text-gray-700 mb-1">Flat Type</label>
+              <select name="flatType" value={form.flatType} onChange={handleSelect} className={inputClass}>
                 <option value="">Select flat type</option>
-                {FLAT_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
+                {FLAT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
               {errors.flatType && <p className="text-red-500 text-xs mt-1">{errors.flatType}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Town / Estate
-              </label>
-              <select
-                name="town"
-                value={form.town}
-                onChange={handleChange}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
+              <label className="block text-sm font-medium text-gray-700 mb-1">Town / Estate</label>
+              <select name="town" value={form.town} onChange={handleSelect} className={inputClass}>
                 <option value="">Select town</option>
-                {HDB_TOWNS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
+                {HDB_TOWNS.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
               {errors.town && <p className="text-red-500 text-xs mt-1">{errors.town}</p>}
             </div>
@@ -123,12 +127,13 @@ export default function AssessmentPage() {
                 Estimated Current Value (S$)
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 name="estimatedValue"
                 value={form.estimatedValue}
-                onChange={handleChange}
-                placeholder="e.g. 450000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={handleMoney}
+                placeholder="e.g. 450,000"
+                className={inputClass}
               />
               {errors.estimatedValue && <p className="text-red-500 text-xs mt-1">{errors.estimatedValue}</p>}
             </div>
@@ -139,12 +144,13 @@ export default function AssessmentPage() {
                 <span className="text-gray-400 font-normal">— optional</span>
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 name="remainingLoan"
                 value={form.remainingLoan}
-                onChange={handleChange}
-                placeholder="e.g. 150000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={handleMoney}
+                placeholder="e.g. 150,000"
+                className={inputClass}
               />
             </div>
           </section>
@@ -158,12 +164,13 @@ export default function AssessmentPage() {
                 Your Monthly Income (S$)
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 name="myIncome"
                 value={form.myIncome}
-                onChange={handleChange}
-                placeholder="e.g. 5000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={handleMoney}
+                placeholder="e.g. 5,000"
+                className={inputClass}
               />
               {errors.myIncome && <p className="text-red-500 text-xs mt-1">{errors.myIncome}</p>}
             </div>
@@ -174,24 +181,20 @@ export default function AssessmentPage() {
                 <span className="text-gray-400 font-normal">— optional</span>
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 name="wifeIncome"
                 value={form.wifeIncome}
-                onChange={handleChange}
-                placeholder="e.g. 4000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={handleMoney}
+                placeholder="e.g. 4,000"
+                className={inputClass}
               />
             </div>
 
-            {(form.myIncome || form.wifeIncome) && (
+            {combinedIncome > 0 && (
               <div className="bg-blue-50 rounded-lg px-4 py-3 text-sm text-blue-800">
                 Combined household income:{" "}
-                <strong>
-                  S${(
-                    (Number(form.myIncome) || 0) + (Number(form.wifeIncome) || 0)
-                  ).toLocaleString()}
-                  /month
-                </strong>
+                <strong>S${combinedIncome.toLocaleString("en-SG")}/month</strong>
               </div>
             )}
           </section>

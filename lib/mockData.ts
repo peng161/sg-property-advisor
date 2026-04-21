@@ -30,15 +30,15 @@ export const HDB_RESALE_PRICES: Record<string, Record<string, number>> = {
 
 // Sample EC developments (S$) — entry-level psf × typical size
 export const EC_OPTIONS = [
-  { name: "Lumina Grand (Bukit Batok)", price: 1280000, location: "West" },
-  { name: "Novo Place (Tengah)", price: 1250000, location: "West" },
-  { name: "Parc Greenwich (Sengkang)", price: 1200000, location: "North-East" },
-  { name: "Tenet (Tampines)", price: 1350000, location: "East" },
+  { name: "Lumina Grand (Bukit Batok)", price: 1280000, location: "West",       bedrooms: "3–4 bedroom" },
+  { name: "Novo Place (Tengah)",         price: 1250000, location: "West",       bedrooms: "3–4 bedroom" },
+  { name: "Parc Greenwich (Sengkang)",   price: 1200000, location: "North-East", bedrooms: "3–4 bedroom" },
+  { name: "Tenet (Tampines)",            price: 1350000, location: "East",       bedrooms: "3–5 bedroom" },
 ];
 
 // Sample private condo price ranges (S$) by region
 export const PRIVATE_CONDO_OPTIONS = [
-  { name: "OCR Condo (Outside Central Region)", minPrice: 1200000, maxPrice: 1800000, region: "Suburbs" },
-  { name: "RCR Condo (Rest of Central Region)", minPrice: 1800000, maxPrice: 2800000, region: "City Fringe" },
-  { name: "CCR Condo (Core Central Region)", minPrice: 2800000, maxPrice: 5000000, region: "Prime" },
+  { name: "OCR Condo (Outside Central Region)", minPrice: 1200000, maxPrice: 1800000, region: "Suburbs",     bedrooms: "2–4 bedroom" },
+  { name: "RCR Condo (Rest of Central Region)", minPrice: 1800000, maxPrice: 2800000, region: "City Fringe", bedrooms: "1–3 bedroom" },
+  { name: "CCR Condo (Core Central Region)",    minPrice: 2800000, maxPrice: 5000000, region: "Prime",       bedrooms: "1–3 bedroom" },
 ];
