@@ -1,13 +1,13 @@
-import { assess } from "@/lib/calculator";
+import { assess, fmtPrice, fmt } from "@/lib/calculator";
 import { fetchHdbPrices } from "@/lib/fetchHdb";
 import { fetchPrivatePrices } from "@/lib/fetchPrivate";
 import Link from "next/link";
 
-const OPTION_STYLE: Record<string, { icon: string; accent: string; lightBg: string }> = {
-  "Stay":          { icon: "🏠", accent: "text-slate-700",   lightBg: "bg-slate-50"   },
-  "Bigger HDB":    { icon: "📈", accent: "text-blue-700",    lightBg: "bg-blue-50"    },
-  "EC":            { icon: "🏙️", accent: "text-violet-700",  lightBg: "bg-violet-50"  },
-  "Private Condo": { icon: "✨", accent: "text-emerald-700", lightBg: "bg-emerald-50" },
+const OPTION_STYLE: Record<string, { icon: string; lightBg: string }> = {
+  "Stay":          { icon: "🏠", lightBg: "bg-slate-50"   },
+  "Bigger HDB":    { icon: "📈", lightBg: "bg-blue-50"    },
+  "EC":            { icon: "🏙️", lightBg: "bg-violet-50"  },
+  "Private Condo": { icon: "✨", lightBg: "bg-emerald-50" },
 };
 
 interface PageProps {
@@ -17,13 +17,22 @@ interface PageProps {
 export default async function ResultsPage({ searchParams }: PageProps) {
   const params = await searchParams;
 
+  const rawCitizenship = params.citizenship ?? "SC";
+  const citizenship: "SC" | "PR" | "Foreigner" =
+    rawCitizenship === "PR" ? "PR"
+    : rawCitizenship === "Foreigner" ? "Foreigner"
+    : "SC";
+
   const input = {
-    flatType:       params.flatType ?? "",
-    town:           params.town ?? "",
-    estimatedValue: Number(params.estimatedValue ?? 0),
-    remainingLoan:  Number(params.remainingLoan ?? 0),
-    myIncome:       Number(params.myIncome ?? 0),
-    wifeIncome:     Number(params.wifeIncome ?? 0),
+    flatType:      params.flatType ?? "",
+    town:          params.town ?? "",
+    purchasePrice: Number(params.purchasePrice ?? 0),
+    purchaseYear:  Number(params.purchaseYear ?? new Date().getFullYear() - 10),
+    remainingLoan: Number(params.remainingLoan ?? 0),
+    myIncome:      Number(params.myIncome ?? 0),
+    wifeIncome:    Number(params.wifeIncome ?? 0),
+    citizenship,
+    sellingFirst:  params.sellingFirst !== "no",
   };
 
   const [hdb, privatePrices] = await Promise.all([
@@ -34,6 +43,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const result = assess(input, { hdb, private: privatePrices });
   const recStyle = OPTION_STYLE[result.recommendation];
 
+  const gainPositive = result.capitalGain >= 0;
+
   return (
     <main className="min-h-screen bg-slate-50">
 
@@ -42,10 +53,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         <Link href="/" className="text-white font-bold text-base tracking-tight">
           SG Property Advisor
         </Link>
-        <Link
-          href="/assessment"
-          className="text-xs text-slate-400 hover:text-white border border-slate-700 rounded-full px-3 py-1.5 transition-colors"
-        >
+        <Link href="/assessment"
+          className="text-xs text-slate-400 hover:text-white border border-slate-700 rounded-full px-3 py-1.5 transition-colors">
           ← Edit details
         </Link>
       </div>
@@ -61,26 +70,24 @@ export default async function ResultsPage({ searchParams }: PageProps) {
             <div>
               <h1 className="text-3xl font-bold text-white">{result.recommendation}</h1>
               <p className="text-slate-400 text-sm mt-0.5">
-                {input.flatType} · {input.town}
+                {input.flatType} · {input.town} · {input.citizenship}
               </p>
             </div>
           </div>
-
-          {/* Data source badges */}
           <div className="flex gap-2 flex-wrap">
             <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
               result.dataSource.hdb === "live"
                 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                 : "bg-slate-800 border-slate-700 text-slate-500"
             }`}>
-              {result.dataSource.hdb === "live" ? "🟢" : "⚪"} HDB: {result.dataSource.hdb === "live" ? "Live data" : "Sample data"}
+              {result.dataSource.hdb === "live" ? "🟢" : "⚪"} HDB: {result.dataSource.hdb === "live" ? "Live" : "Sample"}
             </span>
             <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
               result.dataSource.private === "live"
                 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                 : "bg-slate-800 border-slate-700 text-slate-500"
             }`}>
-              {result.dataSource.private === "live" ? "🟢" : "⚪"} Private: {result.dataSource.private === "live" ? "Live (URA)" : "Sample data"}
+              {result.dataSource.private === "live" ? "🟢" : "⚪"} Private: {result.dataSource.private === "live" ? "Live (URA)" : "Sample"}
             </span>
           </div>
         </div>
@@ -88,49 +95,94 @@ export default async function ResultsPage({ searchParams }: PageProps) {
 
       <div className="max-w-xl mx-auto px-4 py-8 space-y-6">
 
-        {/* Financial snapshot */}
+        {/* Property value & gain */}
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
-            <h2 className="font-bold text-slate-900">📊 Financial Snapshot</h2>
+            <h2 className="font-bold text-slate-900">🏠 Your Current Flat</h2>
           </div>
           <div className="divide-y divide-slate-50">
             {[
-              { label: "Combined monthly income",     value: `S$${result.combinedIncome.toLocaleString("en-SG")}`,  dim: false },
-              { label: "Est. cash proceeds from sale", value: `S$${result.cashProceeds.toLocaleString("en-SG")}`,   dim: false },
-              { label: "Max HDB loan (MSR 30%)",       value: `S$${result.maxHdbLoan.toLocaleString("en-SG")}`,     dim: false },
-              { label: "Max bank loan (TDSR 55%)",     value: `S$${result.maxBankLoan.toLocaleString("en-SG")}`,    dim: false },
-              { label: "Total HDB upgrade budget",     value: `S$${result.hdbBudget.toLocaleString("en-SG")}`,      dim: true  },
-              { label: "Total private upgrade budget", value: `S$${result.privateBudget.toLocaleString("en-SG")}`,  dim: true  },
+              { label: "Purchase price",         value: `S$${fmt(input.purchasePrice)}`,         dim: false },
+              { label: "Estimated market value",  value: `S$${fmt(result.currentMarketValue)}`,   dim: false },
+              { label: "Capital gain",
+                value: `${gainPositive ? "+" : ""}S$${fmt(result.capitalGain)}`,
+                color: gainPositive ? "text-emerald-600" : "text-red-500" },
             ].map((row) => (
               <div key={row.label} className="flex justify-between items-center px-5 py-3.5">
                 <span className="text-sm text-slate-500">{row.label}</span>
-                <span className={`text-sm font-semibold ${row.dim ? "text-emerald-600" : "text-slate-900"}`}>
+                <span className={`text-sm font-semibold ${"color" in row ? row.color : "text-slate-900"}`}>
                   {row.value}
                 </span>
               </div>
             ))}
           </div>
-          <div className="px-5 py-3 bg-slate-50 border-t border-slate-100">
-            <p className="text-xs text-slate-400">
-              Simplified estimate. Excludes CPF accrued interest, BSD, ABSD, legal fees.
-            </p>
+        </section>
+
+        {/* Selling costs + net proceeds */}
+        <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h2 className="font-bold text-slate-900">💸 If You Sell Today</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Standard Singapore agent & legal fees</p>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {[
+              { label: "Agent fee (2% of market value)", value: `-S$${fmt(result.sellingCosts.agentFee)}`, red: true },
+              { label: "Legal fees",                     value: `-S$${fmt(result.sellingCosts.legalFee)}`, red: true },
+              { label: "Outstanding loan",               value: `-S$${fmt(input.remainingLoan)}`,          red: true },
+            ].map((row) => (
+              <div key={row.label} className="flex justify-between items-center px-5 py-3">
+                <span className="text-sm text-slate-500">{row.label}</span>
+                <span className={`text-sm font-medium ${row.red ? "text-red-500" : "text-slate-900"}`}>
+                  {row.value}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="px-5 py-4 bg-slate-900 flex items-center justify-between">
+            <span className="text-sm font-bold text-white">Net Proceeds</span>
+            <span className="text-lg font-bold text-emerald-400">
+              S${fmt(result.netProceeds)}
+            </span>
           </div>
         </section>
 
-        {/* Upgrade options */}
+        {/* Financial snapshot */}
+        <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h2 className="font-bold text-slate-900">📊 Loan Eligibility</h2>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {[
+              { label: "Combined monthly income",     value: `S$${fmt(result.combinedIncome)}` },
+              { label: "Max HDB loan (MSR 30%)",      value: `S$${fmt(result.maxHdbLoan)}` },
+              { label: "Max bank loan (TDSR 55%)",    value: `S$${fmt(result.maxBankLoan)}` },
+              { label: "Total HDB upgrade budget",    value: `S$${fmt(result.hdbBudget)}`,     highlight: true },
+              { label: "Total private upgrade budget",value: `S$${fmt(result.privateBudget)}`, highlight: true },
+            ].map((row) => (
+              <div key={row.label} className="flex justify-between items-center px-5 py-3.5">
+                <span className="text-sm text-slate-500">{row.label}</span>
+                <span className={`text-sm font-semibold ${"highlight" in row && row.highlight ? "text-emerald-600" : "text-slate-900"}`}>
+                  {row.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Upgrade option cards */}
         <div>
           <h2 className="font-bold text-slate-900 mb-3 px-1">All Options</h2>
           <div className="space-y-3">
             {result.options.map((option) => {
               const style = OPTION_STYLE[option.type];
               const isRec = option.type === result.recommendation;
+              const costs = option.costs;
+
               return (
-                <div
-                  key={option.type}
-                  className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md ${
-                    isRec ? "border-emerald-300 ring-2 ring-emerald-100" : "border-slate-100"
-                  }`}
-                >
+                <div key={option.type}
+                  className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-shadow hover:shadow-md
+                    ${isRec ? "border-emerald-300 ring-2 ring-emerald-100" : "border-slate-100"}`}>
+
                   {isRec && (
                     <div className="bg-emerald-500 px-4 py-1.5 flex items-center gap-1.5">
                       <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -141,7 +193,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                   )}
 
                   <div className="p-5">
-                    <div className="flex items-start justify-between mb-3">
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-xl ${style.lightBg} flex items-center justify-center text-xl`}>
                           {style.icon}
@@ -149,15 +202,14 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                         <h3 className="font-bold text-slate-900">{option.label}</h3>
                       </div>
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                        option.affordable
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-red-50 text-red-500"
+                        option.affordable ? "bg-emerald-100 text-emerald-700" : "bg-red-50 text-red-500"
                       }`}>
                         {option.affordable ? "✓ Affordable" : "✗ Out of range"}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 mb-3">
+                    {/* Price + repayment */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="bg-slate-50 rounded-xl p-3">
                         <p className="text-xs text-slate-400 mb-0.5">Est. Price</p>
                         <p className="text-sm font-semibold text-slate-800">{option.priceRange}</p>
@@ -168,6 +220,41 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                       </div>
                     </div>
 
+                    {/* Cost breakdown (hidden for Stay) */}
+                    {option.type !== "Stay" && costs.total > 0 && (
+                      <div className="border border-slate-100 rounded-xl overflow-hidden mb-3">
+                        <div className="bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                          Upfront Cost Breakdown
+                        </div>
+                        <div className="divide-y divide-slate-50">
+                          {[
+                            { label: "Down payment",      value: costs.downPayment },
+                            { label: "BSD",               value: costs.bsd         },
+                            { label: "ABSD",              value: costs.absd, highlight: costs.absd > 0 },
+                            { label: "Agent fee (1%)",    value: costs.agentFee    },
+                            { label: "Legal fees",        value: costs.legalFee    },
+                          ].map((row) => (
+                            <div key={row.label} className="flex justify-between px-3 py-2">
+                              <span className="text-xs text-slate-500">{row.label}</span>
+                              <span className={`text-xs font-semibold ${
+                                "highlight" in row && row.highlight ? "text-orange-600" : "text-slate-700"
+                              }`}>
+                                {row.value === 0 ? <span className="text-slate-300">—</span> : `S$${fmt(row.value)}`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="bg-slate-900 px-3 py-2.5 flex justify-between items-center">
+                          <span className="text-xs font-bold text-white">Total Upfront</span>
+                          <span className={`text-sm font-bold ${
+                            result.netProceeds >= costs.total ? "text-emerald-400" : "text-red-400"
+                          }`}>
+                            S${fmt(costs.total)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-xs text-slate-500 leading-relaxed">{option.notes}</p>
                   </div>
                 </div>
@@ -176,7 +263,13 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        <div className="text-center pt-2 pb-10">
+        <div className="bg-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
+          <strong className="text-slate-700">Disclaimer:</strong> Estimates only. BSD/ABSD based on 2024 IRAS rates.
+          Agent fees at standard CEA rates (2% seller, 1% buyer). Excludes CPF accrued interest, valuation fees,
+          and renovation costs. Consult a licensed property agent for personalised advice.
+        </div>
+
+        <div className="text-center pb-10">
           <Link href="/" className="text-sm text-slate-400 hover:text-slate-600 underline">
             Start over
           </Link>
