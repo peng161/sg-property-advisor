@@ -57,12 +57,12 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           <h3 className="font-semibold text-gray-800 mb-4">📊 Your Financial Snapshot</h3>
           <div className="space-y-3">
             {[
-              { label: "Combined monthly income", value: `S$${result.combinedIncome.toLocaleString()}` },
-              { label: "Est. cash proceeds from sale", value: `S$${result.cashProceeds.toLocaleString()}` },
-              { label: "Max HDB loan (MSR 30%)", value: `S$${result.maxHdbLoan.toLocaleString()}` },
-              { label: "Max bank loan (TDSR 55%)", value: `S$${result.maxBankLoan.toLocaleString()}` },
-              { label: "Total HDB upgrade budget", value: `S$${result.hdbBudget.toLocaleString()}`, highlight: true },
-              { label: "Total private upgrade budget", value: `S$${result.privateBudget.toLocaleString()}`, highlight: true },
+              { label: "Combined monthly income", value: `S$${result.combinedIncome.toLocaleString("en-SG")}` },
+              { label: "Est. cash proceeds from sale", value: `S$${result.cashProceeds.toLocaleString("en-SG")}` },
+              { label: "Max HDB loan (MSR 30%)", value: `S$${result.maxHdbLoan.toLocaleString("en-SG")}` },
+              { label: "Max bank loan (TDSR 55%)", value: `S$${result.maxBankLoan.toLocaleString("en-SG")}` },
+              { label: "Total HDB upgrade budget", value: `S$${result.hdbBudget.toLocaleString("en-SG")}`, highlight: true },
+              { label: "Total private upgrade budget", value: `S$${result.privateBudget.toLocaleString("en-SG")}`, highlight: true },
             ].map((row) => (
               <div key={row.label} className="flex justify-between items-center text-sm">
                 <span className="text-gray-600">{row.label}</span>

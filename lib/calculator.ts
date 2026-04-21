@@ -1,5 +1,9 @@
 import { HDB_RESALE_PRICES, EC_OPTIONS, PRIVATE_CONDO_OPTIONS } from "./mockData";
 
+export function fmt(n: number): string {
+  return n.toLocaleString("en-SG");
+}
+
 export interface AssessmentInput {
   flatType: string;
   town: string;
@@ -75,8 +79,8 @@ export function assess(input: AssessmentInput): AssessmentResult {
     type: "Stay",
     label: "Stay in Current Flat",
     affordable: true,
-    priceRange: `Est. S$${currentMarketValue.toLocaleString()}`,
-    monthlyRepayment: `S$${monthlyRepayment(input.remainingLoan, 0.026, 20).toLocaleString()}/mo (existing)`,
+    priceRange: `Est. S$${currentMarketValue.toLocaleString("en-SG")}`,
+    monthlyRepayment: `S$${monthlyRepayment(input.remainingLoan, 0.026, 20).toLocaleString("en-SG")}/mo (existing)`,
     notes: "No upgrade cost. Preserves cash and CPF. Good if market is uncertain.",
   });
 
@@ -95,11 +99,11 @@ export function assess(input: AssessmentInput): AssessmentResult {
       type: "Bigger HDB",
       label: `Upgrade to ${nextFlatType} HDB`,
       affordable,
-      priceRange: `~S$${biggerHdbPrice.toLocaleString()} (${input.town})`,
-      monthlyRepayment: `S$${monthlyRepayment(loanNeeded, 0.026, 25).toLocaleString()}/mo`,
+      priceRange: `~S$${biggerHdbPrice.toLocaleString("en-SG")} (${input.town})`,
+      monthlyRepayment: `S$${monthlyRepayment(loanNeeded, 0.026, 25).toLocaleString("en-SG")}/mo`,
       notes: affordable
-        ? `Loan needed: S$${loanNeeded.toLocaleString()}. Within HDB loan limits.`
-        : `Requires S$${biggerHdbPrice.toLocaleString()} — exceeds your HDB budget of S$${hdbBudget.toLocaleString()}.`,
+        ? `Loan needed: S$${loanNeeded.toLocaleString("en-SG")}. Within HDB loan limits.`
+        : `Requires S$${biggerHdbPrice.toLocaleString("en-SG")} — exceeds your HDB budget of S$${hdbBudget.toLocaleString("en-SG")}.`,
     });
   }
 
@@ -112,13 +116,13 @@ export function assess(input: AssessmentInput): AssessmentResult {
     affordable: ecEligible && !!affordableEc,
     priceRange: `S$1.2M – S$1.4M (entry level)`,
     monthlyRepayment: affordableEc
-      ? `S$${monthlyRepayment(Math.max(0, affordableEc.price - cashProceeds), 0.035, 25).toLocaleString()}/mo`
+      ? `S$${monthlyRepayment(Math.max(0, affordableEc.price - cashProceeds), 0.035, 25).toLocaleString("en-SG")}/mo`
       : "—",
     notes: !ecEligible
-      ? `Not eligible — household income S$${combinedIncome.toLocaleString()} exceeds S$16,000 ceiling.`
+      ? `Not eligible — household income S$${combinedIncome.toLocaleString("en-SG")} exceeds S$16,000 ceiling.`
       : affordableEc
-      ? `${affordableEc.name} at S$${affordableEc.price.toLocaleString()} is within reach.`
-      : `ECs start ~S$1.2M — your private budget is S$${privateBudget.toLocaleString()}.`,
+      ? `${affordableEc.name} at S$${affordableEc.price.toLocaleString("en-SG")} is within reach.`
+      : `ECs start ~S$1.2M — your private budget is S$${privateBudget.toLocaleString("en-SG")}.`,
   });
 
   // 4. Private Condo
@@ -128,14 +132,14 @@ export function assess(input: AssessmentInput): AssessmentResult {
     label: "Private Condominium",
     affordable: !!affordablePrivate,
     priceRange: affordablePrivate
-      ? `S$${affordablePrivate.minPrice.toLocaleString()} – S$${affordablePrivate.maxPrice.toLocaleString()} (${affordablePrivate.region})`
+      ? `S$${affordablePrivate.minPrice.toLocaleString("en-SG")} – S$${affordablePrivate.maxPrice.toLocaleString("en-SG")} (${affordablePrivate.region})`
       : "S$1.2M+",
     monthlyRepayment: affordablePrivate
-      ? `S$${monthlyRepayment(Math.max(0, affordablePrivate.minPrice - cashProceeds), 0.035, 25).toLocaleString()}/mo`
+      ? `S$${monthlyRepayment(Math.max(0, affordablePrivate.minPrice - cashProceeds), 0.035, 25).toLocaleString("en-SG")}/mo`
       : "—",
     notes: affordablePrivate
-      ? `${affordablePrivate.name} is achievable. Budget S$${privateBudget.toLocaleString()}.`
-      : `Private condos start ~S$1.2M — your bank loan budget is S$${privateBudget.toLocaleString()}.`,
+      ? `${affordablePrivate.name} is achievable. Budget S$${privateBudget.toLocaleString("en-SG")}.`
+      : `Private condos start ~S$1.2M — your bank loan budget is S$${privateBudget.toLocaleString("en-SG")}.`,
   });
 
   // --- Top recommendation ---
