@@ -1,35 +1,52 @@
 import { type NextRequest } from "next/server";
-import { fetchPrivateTransactions } from "@/lib/fetchPrivateTransactions";
+import { fetchDataGovPrivate, type PrivateRecord } from "@/lib/fetchDataGovPrivate";
 
-// Cache the response for 1 hour on Vercel CDN
-export const revalidate = 3600;
+// In-memory cache — survives across requests in the same warm serverless instance
+let CACHE: { records: PrivateRecord[]; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Also tell Vercel CDN to cache the response for 5 minutes
+export const revalidate = 300;
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = request.nextUrl;
-  const minYear  = Number(searchParams.get("minYear")  ?? 2022);
-  const maxPrice = Number(searchParams.get("maxPrice") ?? 0);
-  const segment  = searchParams.get("segment") ?? "";   // CCR | RCR | OCR | ""
+  const sp       = request.nextUrl.searchParams;
+  const minYear  = Number(sp.get("minYear")  ?? 0);
+  const maxPrice = Number(sp.get("maxPrice") ?? 0);
+  const segment  = sp.get("segment") ?? "";
 
-  let transactions = await fetchPrivateTransactions();
-
-  // Filter by year
-  transactions = transactions.filter(
-    (t) => Number(t.contractDate.slice(0, 4)) >= minYear
-  );
-
-  // Filter by max price
-  if (maxPrice > 0) {
-    transactions = transactions.filter((t) => t.price <= maxPrice);
+  // Serve from in-memory cache if still fresh
+  const now = Date.now();
+  if (!CACHE || now > CACHE.expiresAt) {
+    try {
+      console.log("[private-properties] fetching from data.gov.sg…");
+      const records = await fetchDataGovPrivate();
+      CACHE = { records, expiresAt: now + CACHE_TTL_MS };
+      console.log(`[private-properties] cached ${records.length} records`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[private-properties] fetch failed:", msg);
+      return Response.json(
+        { error: msg, source: "error", transactions: [] },
+        { status: 502 }
+      );
+    }
   }
 
-  // Filter by market segment
+  let data = CACHE.records;
+
+  if (minYear > 0) {
+    data = data.filter((r) => Number(r.transactionDate.slice(0, 4)) >= minYear);
+  }
+  if (maxPrice > 0) {
+    data = data.filter((r) => r.price <= maxPrice);
+  }
   if (segment === "CCR" || segment === "RCR" || segment === "OCR") {
-    transactions = transactions.filter((t) => t.marketSegment === segment);
+    data = data.filter((r) => r.marketSegment === segment);
   }
 
   return Response.json({
-    total: transactions.length,
-    source: process.env.URA_ACCESS_KEY ? "ura-live" : "mock",
-    transactions,
+    total:        data.length,
+    source:       "data.gov.sg",
+    transactions: data,
   });
 }
