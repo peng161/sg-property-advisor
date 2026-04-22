@@ -27,6 +27,15 @@ const CITIZENSHIPS = [
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: CURRENT_YEAR - 1979 }, (_, i) => CURRENT_YEAR - i);
+const FLOORS = Array.from({ length: 50 }, (_, i) => i + 1);
+
+// Typical floor area hint per flat type
+const SQM_PLACEHOLDER: Record<string, string> = {
+  "3-Room":    "e.g. 67",
+  "4-Room":    "e.g. 95",
+  "5-Room":    "e.g. 118",
+  "Executive": "e.g. 145",
+};
 
 function rawNumber(v: string) { return v.replace(/,/g, ""); }
 function addCommas(v: string) {
@@ -45,9 +54,12 @@ export default function AssessmentPage() {
   const [form, setForm] = useState({
     flatType:      "",
     town:          "",
+    floor:         "",
+    sqm:           "",
     purchasePrice: "",
     purchaseYear:  "",
     remainingLoan: "",
+    cpfUsed:       "",
     citizenship:   "",
     sellingFirst:  "yes",
     myIncome:      "",
@@ -61,6 +73,11 @@ export default function AssessmentPage() {
   }
   function handleMoney(e: React.ChangeEvent<HTMLInputElement>) {
     setForm({ ...form, [e.target.name]: addCommas(e.target.value) });
+    setErrors({ ...errors, [e.target.name]: "" });
+  }
+  function handleNumber(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = e.target.value.replace(/\D/g, "");
+    setForm({ ...form, [e.target.name]: v });
     setErrors({ ...errors, [e.target.name]: "" });
   }
   function set(key: string, val: string) {
@@ -99,9 +116,12 @@ export default function AssessmentPage() {
     const params = new URLSearchParams({
       flatType:      form.flatType,
       town:          form.town,
+      floor:         form.floor || "10",
+      sqm:           form.sqm || "0",
       purchasePrice: rawNumber(form.purchasePrice),
       purchaseYear:  form.purchaseYear,
       remainingLoan: rawNumber(form.remainingLoan) || "0",
+      cpfUsed:       rawNumber(form.cpfUsed) || "0",
       citizenship:   form.citizenship,
       sellingFirst:  form.sellingFirst,
       myIncome:      rawNumber(form.myIncome),
@@ -184,6 +204,40 @@ export default function AssessmentPage() {
                 {errors.town && <p className="text-red-500 text-xs mt-1">{errors.town}</p>}
               </div>
 
+              {/* Floor level + floor area side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Floor Level</label>
+                  <div className="relative">
+                    <select name="floor" value={form.floor} onChange={handleSelect} className={selectClass}>
+                      <option value="">Select floor</option>
+                      {FLOORS.map((f) => <option key={f} value={f}>Floor {f}</option>)}
+                    </select>
+                    <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                  {errors.floor && <p className="text-red-500 text-xs mt-1">{errors.floor}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Floor Area (sqm)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    name="sqm"
+                    value={form.sqm}
+                    onChange={handleNumber}
+                    placeholder={SQM_PLACEHOLDER[form.flatType] ?? "e.g. 95"}
+                    className={inputClass}
+                  />
+                  {errors.sqm && <p className="text-red-500 text-xs mt-1">{errors.sqm}</p>}
+                </div>
+              </div>
+
               {/* Purchase price + year side by side */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -218,18 +272,33 @@ export default function AssessmentPage() {
                 </div>
               </div>
 
-              {/* Remaining loan */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Remaining HDB Loan
-                  <span className="text-slate-400 font-normal ml-1">— optional</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
-                  <input type="text" inputMode="numeric" name="remainingLoan"
-                    value={form.remainingLoan} onChange={handleMoney}
-                    placeholder="150,000"
-                    className={`${inputClass} pl-8`} />
+              {/* Remaining loan + CPF used side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">
+                    Remaining Loan
+                    <span className="text-slate-400 font-normal ml-1">— optional</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <input type="text" inputMode="numeric" name="remainingLoan"
+                      value={form.remainingLoan} onChange={handleMoney}
+                      placeholder="150,000"
+                      className={`${inputClass} pl-8`} />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">
+                    CPF Used
+                    <span className="text-slate-400 font-normal ml-1">— optional</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <input type="text" inputMode="numeric" name="cpfUsed"
+                      value={form.cpfUsed} onChange={handleMoney}
+                      placeholder="80,000"
+                      className={`${inputClass} pl-8`} />
+                  </div>
                 </div>
               </div>
 

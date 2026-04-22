@@ -26,9 +26,12 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const input = {
     flatType:      params.flatType ?? "",
     town:          params.town ?? "",
+    floor:         Number(params.floor ?? 10),
+    sqm:           Number(params.sqm ?? 0),
     purchasePrice: Number(params.purchasePrice ?? 0),
     purchaseYear:  Number(params.purchaseYear ?? new Date().getFullYear() - 10),
     remainingLoan: Number(params.remainingLoan ?? 0),
+    cpfUsed:       Number(params.cpfUsed ?? 0),
     myIncome:      Number(params.myIncome ?? 0),
     wifeIncome:    Number(params.wifeIncome ?? 0),
     citizenship,
@@ -99,11 +102,26 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
             <h2 className="font-bold text-slate-900">🏠 Your Current Flat</h2>
+            {/* Flat details pill row */}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {[
+                input.flatType && `${input.flatType}`,
+                input.town && input.town,
+                input.floor && `Floor ${input.floor}`,
+                input.sqm > 0 && `${input.sqm} sqm`,
+              ].filter(Boolean).map((tag) => (
+                <span key={String(tag)} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
           <div className="divide-y divide-slate-50">
             {[
-              { label: "Purchase price",         value: `S$${fmt(input.purchasePrice)}`,         dim: false },
-              { label: "Estimated market value",  value: `S$${fmt(result.currentMarketValue)}`,   dim: false },
+              { label: "Purchase price",         value: `S$${fmt(input.purchasePrice)}` },
+              { label: "Estimated market value",  value: `S$${fmt(result.currentMarketValue)}` },
+              ...(input.sqm > 0 ? [{ label: "Price per sqm (est.)", value: `S$${fmt(Math.round(result.currentMarketValue / input.sqm))}/sqm` }] : []),
+              ...(input.cpfUsed > 0 ? [{ label: "CPF used to date", value: `S$${fmt(input.cpfUsed)}` }] : []),
               { label: "Capital gain",
                 value: `${gainPositive ? "+" : ""}S$${fmt(result.capitalGain)}`,
                 color: gainPositive ? "text-emerald-600" : "text-red-500" },
