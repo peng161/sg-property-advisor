@@ -1,6 +1,8 @@
 import { assess, fmtPrice, fmt } from "@/lib/calculator";
 import { fetchHdbPrices } from "@/lib/fetchHdb";
 import { fetchPrivatePrices } from "@/lib/fetchPrivate";
+import { fetchPrivateTransactions } from "@/lib/fetchPrivateTransactions";
+import PrivatePropertyPanel from "@/components/PrivatePropertyPanel";
 import Link from "next/link";
 
 const OPTION_STYLE: Record<string, { icon: string; lightBg: string }> = {
@@ -38,9 +40,10 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     sellingFirst:  params.sellingFirst !== "no",
   };
 
-  const [hdb, privatePrices] = await Promise.all([
+  const [hdb, privatePrices, privateTransactions] = await Promise.all([
     fetchHdbPrices(input.town),
     fetchPrivatePrices(),
+    fetchPrivateTransactions(),
   ]);
 
   const result = assess(input, { hdb, private: privatePrices });
@@ -280,6 +283,12 @@ export default async function ResultsPage({ searchParams }: PageProps) {
             })}
           </div>
         </div>
+
+        {/* Private property transactions */}
+        <PrivatePropertyPanel
+          transactions={privateTransactions}
+          source={process.env.URA_ACCESS_KEY ? "ura-live" : "mock"}
+        />
 
         <div className="bg-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
           <strong className="text-slate-700">Disclaimer:</strong> Estimates only. BSD/ABSD based on 2024 IRAS rates.
