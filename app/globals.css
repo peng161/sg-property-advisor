@@ -2,4 +2,15 @@
 
 body {
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-text-size-adjust: 100%; /* prevent iOS font scaling */
+}
+
+/* Ensure tap targets are comfortable on mobile */
+button, a, select, input {
+  touch-action: manipulation;
+}
+
+/* Prevent horizontal scroll on small screens */
+html, body {
+  overflow-x: hidden;
 }

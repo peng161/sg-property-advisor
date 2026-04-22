@@ -175,7 +175,7 @@ export default function PrivatePropertyPanel({ transactions, source }: Props) {
   return (
     <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-slate-100">
+      <div className="px-4 sm:px-5 py-4 border-b border-slate-100">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="font-bold text-slate-900">🏙️ Private Property Transactions</h2>
@@ -232,7 +232,7 @@ export default function PrivatePropertyPanel({ transactions, source }: Props) {
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[580px] text-xs">
           <thead>
             <tr className="bg-slate-50 border-t border-b border-slate-100">
               <th className="text-left px-4 py-2.5 font-semibold text-slate-500 whitespace-nowrap">Project</th>
