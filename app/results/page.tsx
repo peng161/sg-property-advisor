@@ -1,7 +1,6 @@
 import { assess, fmtPrice, fmt } from "@/lib/calculator";
 import { fetchHdbPrices, fetchHdbTransactions } from "@/lib/fetchHdb";
 import { fetchPrivatePrices } from "@/lib/fetchPrivate";
-import { fetchPrivateTransactions } from "@/lib/fetchPrivateTransactions";
 import { geocodePostal } from "@/lib/geocode";
 import { getTransactions as getMockHdb } from "@/lib/mockTransactions";
 import NearbyHdbPanel from "@/components/NearbyHdbPanel";
@@ -63,10 +62,9 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     : 0;
 
   // Fetch all data in parallel
-  const [hdb, privatePrices, privateTx, hdbTx] = await Promise.all([
+  const [hdb, privatePrices, hdbTx] = await Promise.all([
     fetchHdbPrices(town),
     fetchPrivatePrices(),
-    fetchPrivateTransactions(),
     town ? fetchHdbTransactions(town) : Promise.resolve([]),
   ]);
 
@@ -329,10 +327,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         />
 
         {/* ── Private property ── */}
-        <PrivatePropertyPanel
-          transactions={privateTx}
-          source={process.env.URA_ACCESS_KEY ? "ura-live" : "mock"}
-        />
+        <PrivatePropertyPanel />
 
         <p className="bg-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
           <strong className="text-slate-700">Disclaimer:</strong> Estimates only. BSD/ABSD based on 2024 IRAS rates.
