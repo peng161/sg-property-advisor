@@ -124,8 +124,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           </p>
           <div className="flex gap-2 pt-1 flex-wrap">
             {[
-              { label: "HDB",     live: result.dataSource.hdb     === "live" },
-              { label: "Private", live: result.dataSource.private === "live" },
+              { label: "HDB", live: result.dataSource.hdb === "live" },
             ].map(({ label, live }) => (
               <span
                 key={label}

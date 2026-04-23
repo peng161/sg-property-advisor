@@ -1,5 +1,43 @@
 @import "tailwindcss";
 
+/*
+ * ─── Design token palette ───────────────────────────────────────────────────
+ * Add new semantic tokens here. They become Tailwind utilities automatically,
+ * e.g. bg-brand-bg, text-brand-accent, border-brand-card.
+ * Never hardcode hex values in component files — use these tokens instead.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+@theme {
+  /* Page background — warm sage green */
+  --color-brand-bg:       #D9E4D7;
+
+  /* Primary accent — amber gold (buttons, selected states, highlights) */
+  --color-brand-accent:   #FBBF24;   /* = amber-400 */
+  --color-brand-accent-hover: #FCD34D; /* = amber-300 */
+
+  /* Dark surface — headers, stat cards, primary buttons */
+  --color-brand-dark:     #171717;   /* = neutral-900 */
+  --color-brand-dark-2:   #262626;   /* = neutral-800, hover state */
+
+  /* Card / panel surface */
+  --color-brand-card:     #FFFFFF;
+
+  /* Text roles */
+  --color-brand-text:     #171717;   /* = neutral-900, headings */
+  --color-brand-muted:    #737373;   /* = neutral-500, secondary text */
+  --color-brand-subtle:   #A3A3A3;   /* = neutral-400, labels/placeholders */
+
+  /* Borders & dividers */
+  --color-brand-border:   #E5E5E5;   /* = neutral-200 */
+
+  /* Semantic — keep emerald ONLY for live-data badges and positive values */
+  --color-brand-live:     #059669;   /* = emerald-600 */
+  --color-brand-live-bg:  #D1FAE5;   /* = emerald-100 */
+
+  /* Semantic — red for errors / negative values */
+  --color-brand-error:    #EF4444;   /* = red-500 */
+}
+
 body {
   font-family: Arial, Helvetica, sans-serif;
   -webkit-text-size-adjust: 100%; /* prevent iOS font scaling */

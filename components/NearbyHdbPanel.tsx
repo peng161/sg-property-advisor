@@ -178,7 +178,7 @@ export default function NearbyHdbPanel({
   const statsMedianPsm   = median(activeTx.map((t) => t.pricePerSqm));
 
   return (
-    <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <section className="bg-white rounded-3xl shadow-sm overflow-hidden">
 
       {/* Header */}
       <div className="px-4 py-4 border-b border-slate-100">

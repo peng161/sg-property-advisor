@@ -19,8 +19,6 @@ const CITIZENSHIPS = [
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS  = Array.from({ length: CURRENT_YEAR - 1979 }, (_, i) => CURRENT_YEAR - i);
-const FLOORS = Array.from({ length: 50 }, (_, i) => i + 1);
-
 const SQM_PLACEHOLDER: Record<string, string> = {
   "3-Room": "67", "4-Room": "95", "5-Room": "118", "Executive": "145",
 };
@@ -32,12 +30,12 @@ function addCommas(v: string) {
 }
 
 const inputCls =
-  "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 " +
-  "placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 " +
+  "w-full bg-neutral-50 border border-neutral-200 rounded-2xl px-4 py-3 text-neutral-900 " +
+  "placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-amber-400 " +
   "focus:border-transparent transition-all text-sm";
 const selectCls =
-  "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 " +
-  "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent " +
+  "w-full bg-neutral-50 border border-neutral-200 rounded-2xl px-4 py-3 text-neutral-900 " +
+  "focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent " +
   "transition-all text-sm appearance-none";
 
 interface GeoState { address: string; town: string; loading: boolean }
@@ -157,25 +155,32 @@ export default function AssessmentPage() {
     (Number(rawNum(form.myIncome)) || 0) + (Number(rawNum(form.wifeIncome)) || 0);
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* Top bar */}
-      <div className="bg-slate-900 px-4 sm:px-6 py-4 flex items-center justify-between">
-        <Link href="/" className="text-white font-bold text-base tracking-tight">
-          SG Property Advisor
-        </Link>
-        <div className="flex items-center gap-2 text-sm">
-          {[{ n: 1, label: "Your Flat" }, { n: 2, label: "Profile" }].map(({ n, label }) => (
-            <div key={n} className="flex items-center gap-1.5">
-              {n > 1 && <div className={`w-6 sm:w-10 h-px ${step >= n ? "bg-emerald-500" : "bg-slate-700"}`} />}
-              <div className={`flex items-center gap-1.5 ${step >= n ? "text-emerald-400" : "text-slate-500"}`}>
-                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-                  ${step >= n ? "bg-emerald-500 text-white" : "bg-slate-700 text-slate-400"}`}>{n}</span>
-                <span className="hidden sm:inline font-medium">{label}</span>
-              </div>
+    <main className="min-h-screen bg-[#D9E4D7]">
+      {/* Header */}
+      <header className="sticky top-0 z-20 bg-white/75 backdrop-blur-md border-b border-white/50 px-4 sm:px-6 py-3">
+        <div className="max-w-xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-neutral-900 rounded-full flex items-center justify-center shrink-0">
+              <span className="text-white text-[10px] font-black tracking-tighter">SG</span>
             </div>
-          ))}
+            <Link href="/" className="font-bold text-neutral-900 text-sm">SG Property Advisor</Link>
+          </div>
+          {/* Step indicators */}
+          <div className="flex items-center gap-2">
+            {[{ n: 1, label: "Your Flat" }, { n: 2, label: "Profile" }].map(({ n, label }) => (
+              <div key={n} className="flex items-center gap-1.5">
+                {n > 1 && <div className={`w-6 sm:w-10 h-px ${step >= n ? "bg-amber-400" : "bg-neutral-200"}`} />}
+                <div className={`flex items-center gap-1.5 ${step >= n ? "text-amber-500" : "text-neutral-400"}`}>
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                    step >= n ? "bg-amber-400 text-white" : "bg-neutral-200 text-neutral-400"
+                  }`}>{n}</span>
+                  <span className="hidden sm:inline text-xs font-medium">{label}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </header>
 
       <div className="max-w-xl mx-auto px-4 py-8 sm:py-10">
 
@@ -183,15 +188,15 @@ export default function AssessmentPage() {
         {step === 1 && (
           <>
             <div className="mb-6">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Your current flat</h1>
-              <p className="text-slate-500 text-sm mt-1">Enter your postal code — we'll find nearby prices automatically</p>
+              <h1 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight">Your current flat</h1>
+              <p className="text-neutral-500 text-sm mt-1">Enter your postal code — we'll find nearby prices automatically</p>
             </div>
 
             <div className="space-y-5">
 
               {/* Postal code */}
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <label className="block text-sm font-semibold text-neutral-700 mb-2">
                   Postal Code
                 </label>
                 <div className="relative">
@@ -207,19 +212,19 @@ export default function AssessmentPage() {
                     className={`${inputCls} pr-10`}
                   />
                   {geo.loading && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 text-xs">
                       Looking up…
                     </span>
                   )}
                 </div>
                 {errors.postalCode && <p className="text-red-500 text-xs mt-1">{errors.postalCode}</p>}
                 {geo.address && !errors.postalCode && (
-                  <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-start gap-2">
-                    <span className="text-emerald-500 text-sm mt-0.5">✓</span>
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2 flex items-start gap-2">
+                    <span className="text-amber-500 text-sm mt-0.5">✓</span>
                     <div>
-                      <p className="text-xs font-semibold text-emerald-700">{geo.address}</p>
+                      <p className="text-xs font-semibold text-amber-700">{geo.address}</p>
                       {geo.town && (
-                        <p className="text-xs text-emerald-600 mt-0.5">Town: {geo.town}</p>
+                        <p className="text-xs text-amber-600 mt-0.5">Town: {geo.town}</p>
                       )}
                     </div>
                   </div>
@@ -228,19 +233,19 @@ export default function AssessmentPage() {
 
               {/* Flat type tiles */}
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Flat Type</label>
+                <label className="block text-sm font-semibold text-neutral-700 mb-2">Flat Type</label>
                 <div className="grid grid-cols-2 gap-2">
                   {FLAT_TYPES.map((ft) => (
                     <button key={ft.value} type="button"
                       onClick={() => set("flatType", ft.value)}
-                      className={`text-left rounded-xl border-2 px-4 py-3 transition-all min-h-[56px]
+                      className={`text-left rounded-2xl border-2 px-4 py-3 transition-all min-h-[56px]
                         ${form.flatType === ft.value
-                          ? "border-emerald-500 bg-emerald-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                      <div className={`font-semibold text-sm ${form.flatType === ft.value ? "text-emerald-700" : "text-slate-900"}`}>
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
+                      <div className={`font-bold text-sm ${form.flatType === ft.value ? "text-amber-700" : "text-neutral-900"}`}>
                         {ft.label}
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5">{ft.sub}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5">{ft.sub}</div>
                     </button>
                   ))}
                 </div>
@@ -250,7 +255,7 @@ export default function AssessmentPage() {
               {/* Floor + sqm */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Floor Level</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Floor Level</label>
                   <input
                     type="text" inputMode="numeric" name="floor"
                     value={form.floor} onChange={handleNum}
@@ -259,7 +264,7 @@ export default function AssessmentPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Floor Area (sqm)</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Floor Area (sqm)</label>
                   <input
                     type="text" inputMode="numeric" name="sqm"
                     value={form.sqm} onChange={handleNum}
@@ -272,9 +277,9 @@ export default function AssessmentPage() {
               {/* Purchase price + year */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Purchase Price</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Purchase Price</label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">S$</span>
                     <input type="text" inputMode="numeric" name="purchasePrice"
                       value={form.purchasePrice} onChange={handleMoney}
                       placeholder="350,000" className={`${inputCls} pl-8`} />
@@ -282,7 +287,7 @@ export default function AssessmentPage() {
                   {errors.purchasePrice && <p className="text-red-500 text-xs mt-1">{errors.purchasePrice}</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Year Bought</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Year Bought</label>
                   <div className="relative">
                     <select name="purchaseYear" value={form.purchaseYear} onChange={handleSelect} className={selectCls}>
                       <option value="">Year</option>
@@ -297,22 +302,22 @@ export default function AssessmentPage() {
               {/* Loan + CPF */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">
                     Remaining Loan <OptLabel />
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">S$</span>
                     <input type="text" inputMode="numeric" name="remainingLoan"
                       value={form.remainingLoan} onChange={handleMoney}
                       placeholder="150,000" className={`${inputCls} pl-8`} />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  <label className="block text-sm font-semibold text-neutral-700 mb-1">
                     CPF Used <OptLabel />
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">S$</span>
                     <input type="text" inputMode="numeric" name="cpfUsed"
                       value={form.cpfUsed} onChange={handleMoney}
                       placeholder="80,000" className={`${inputCls} pl-8`} />
@@ -321,7 +326,7 @@ export default function AssessmentPage() {
               </div>
 
               <button type="button" onClick={handleNext}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-4 rounded-xl transition-colors flex items-center justify-center gap-2 mt-2 text-sm">
+                className="w-full bg-neutral-900 hover:bg-neutral-800 text-white font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 mt-2 text-sm">
                 Next: Your Profile
                 <ArrowRight />
               </button>
@@ -334,30 +339,30 @@ export default function AssessmentPage() {
           <form onSubmit={handleSubmit}>
             <div className="mb-6">
               <button type="button" onClick={() => setStep(1)}
-                className="text-sm text-slate-500 hover:text-slate-700 mb-3 flex items-center gap-1 py-1">
+                className="text-sm text-neutral-500 hover:text-neutral-700 mb-3 flex items-center gap-1 py-1">
                 <ChevronLeft /> Back
               </button>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Your profile</h1>
-              <p className="text-slate-500 text-sm mt-1">Affects ABSD, loan limits, and EC eligibility</p>
+              <h1 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight">Your profile</h1>
+              <p className="text-neutral-500 text-sm mt-1">Affects ABSD, loan limits, and EC eligibility</p>
             </div>
 
             {/* Flat summary */}
             {(form.flatType || geo.address) && (
-              <div className="bg-slate-900 rounded-xl px-4 py-3 mb-6">
+              <div className="bg-neutral-900 rounded-2xl px-4 py-3 mb-6">
                 <div className="flex items-center justify-between flex-wrap gap-1">
                   <div className="text-sm">
-                    {form.flatType && <span className="text-white font-semibold">{form.flatType} HDB</span>}
-                    {geo.town && <span className="text-slate-400 ml-2">{geo.town}</span>}
+                    {form.flatType && <span className="text-white font-bold">{form.flatType} HDB</span>}
+                    {geo.town && <span className="text-neutral-400 ml-2">{geo.town}</span>}
                   </div>
                   {form.purchasePrice && (
-                    <span className="text-emerald-400 font-semibold text-sm">
+                    <span className="text-amber-400 font-semibold text-sm">
                       Bought S${form.purchasePrice}
                       {form.purchaseYear && ` in ${form.purchaseYear}`}
                     </span>
                   )}
                 </div>
                 {geo.address && (
-                  <p className="text-slate-500 text-xs mt-1 truncate">{geo.address}</p>
+                  <p className="text-neutral-500 text-xs mt-1 truncate">{geo.address}</p>
                 )}
               </div>
             )}
@@ -365,19 +370,19 @@ export default function AssessmentPage() {
             <div className="space-y-5">
               {/* Citizenship */}
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Citizenship Status</label>
+                <label className="block text-sm font-semibold text-neutral-700 mb-2">Citizenship Status</label>
                 <div className="grid grid-cols-3 gap-2">
                   {CITIZENSHIPS.map((c) => (
                     <button key={c.value} type="button"
                       onClick={() => set("citizenship", c.value)}
-                      className={`text-left rounded-xl border-2 px-3 py-3 transition-all min-h-[64px]
+                      className={`text-left rounded-2xl border-2 px-3 py-3 transition-all min-h-[64px]
                         ${form.citizenship === c.value
-                          ? "border-emerald-500 bg-emerald-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                      <div className={`font-semibold text-xs leading-tight ${form.citizenship === c.value ? "text-emerald-700" : "text-slate-900"}`}>
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
+                      <div className={`font-bold text-xs leading-tight ${form.citizenship === c.value ? "text-amber-700" : "text-neutral-900"}`}>
                         {c.label}
                       </div>
-                      <div className="text-xs text-slate-400 mt-1 leading-tight">{c.sub}</div>
+                      <div className="text-xs text-neutral-400 mt-1 leading-tight">{c.sub}</div>
                     </button>
                   ))}
                 </div>
@@ -386,7 +391,7 @@ export default function AssessmentPage() {
 
               {/* Selling first */}
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                <label className="block text-sm font-semibold text-neutral-700 mb-2">
                   Sell current HDB before buying next?
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -396,14 +401,14 @@ export default function AssessmentPage() {
                   ].map((opt) => (
                     <button key={opt.v} type="button"
                       onClick={() => set("sellingFirst", opt.v)}
-                      className={`text-left rounded-xl border-2 px-4 py-3 transition-all min-h-[56px]
+                      className={`text-left rounded-2xl border-2 px-4 py-3 transition-all min-h-[56px]
                         ${form.sellingFirst === opt.v
-                          ? "border-emerald-500 bg-emerald-50"
-                          : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                      <div className={`font-semibold text-sm ${form.sellingFirst === opt.v ? "text-emerald-700" : "text-slate-900"}`}>
+                          ? "border-amber-400 bg-amber-50"
+                          : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
+                      <div className={`font-bold text-sm ${form.sellingFirst === opt.v ? "text-amber-700" : "text-neutral-900"}`}>
                         {opt.label}
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5">{opt.sub}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5">{opt.sub}</div>
                     </button>
                   ))}
                 </div>
@@ -412,9 +417,9 @@ export default function AssessmentPage() {
               {/* Incomes */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Your Monthly Income</label>
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">Your Monthly Income</label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">S$</span>
                     <input type="text" inputMode="numeric" name="myIncome"
                       value={form.myIncome} onChange={handleMoney}
                       placeholder="5,000" className={`${inputCls} pl-8`} />
@@ -422,11 +427,11 @@ export default function AssessmentPage() {
                   {errors.myIncome && <p className="text-red-500 text-xs mt-1">{errors.myIncome}</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  <label className="block text-sm font-semibold text-neutral-700 mb-2">
                     Spouse Income <OptLabel />
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">S$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">S$</span>
                     <input type="text" inputMode="numeric" name="wifeIncome"
                       value={form.wifeIncome} onChange={handleMoney}
                       placeholder="4,000" className={`${inputCls} pl-8`} />
@@ -435,9 +440,9 @@ export default function AssessmentPage() {
               </div>
 
               {combinedIncome > 0 && (
-                <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm text-emerald-700 font-medium">Combined household income</span>
-                  <span className="text-emerald-700 font-bold text-sm">
+                <div className="rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-amber-700 font-medium">Combined household income</span>
+                  <span className="text-amber-700 font-bold text-sm">
                     S${combinedIncome.toLocaleString("en-SG")}
                     <span className="font-normal text-xs">/mo</span>
                   </span>
@@ -445,7 +450,7 @@ export default function AssessmentPage() {
               )}
 
               <button type="submit"
-                className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-semibold py-4 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 text-sm">
+                className="w-full bg-amber-400 hover:bg-amber-300 text-neutral-900 font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-amber-400/20 text-sm">
                 See My Upgrade Options
                 <ArrowRight />
               </button>
@@ -460,11 +465,11 @@ export default function AssessmentPage() {
 // ── Small reusable helpers ──
 
 function OptLabel() {
-  return <span className="text-slate-400 font-normal ml-1 text-xs">optional</span>;
+  return <span className="text-neutral-400 font-normal ml-1 text-xs">optional</span>;
 }
 function ChevronDown() {
   return (
-    <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+    <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
       </svg>

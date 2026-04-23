@@ -83,7 +83,7 @@ function PriceTrendChart({ records }: { records: PrivateRecord[] }) {
 
   return (
     <div className="mb-4">
-      <p className="text-xs font-semibold text-slate-500 mb-1">Median Price / sqm by Month (S$)</p>
+      <p className="text-xs font-semibold text-neutral-500 mb-1">Median Price / sqm by Month (S$)</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 160 }}>
         {/* Grid + Y labels */}
         {ticks.map((v) => (
@@ -121,7 +121,7 @@ function PriceTrendChart({ records }: { records: PrivateRecord[] }) {
       {/* Legend */}
       <div className="flex gap-4 mt-1">
         {lines.map(({ key, color }) => (
-          <div key={key} className="flex items-center gap-1.5 text-xs text-slate-500">
+          <div key={key} className="flex items-center gap-1.5 text-xs text-neutral-500">
             <span className="w-5 h-0.5 inline-block rounded" style={{ backgroundColor: color }} />
             {key}
           </div>
@@ -135,11 +135,11 @@ function PriceTrendChart({ records }: { records: PrivateRecord[] }) {
 function Skeleton() {
   return (
     <div className="animate-pulse space-y-3 px-4 py-6">
-      <div className="h-4 bg-slate-100 rounded w-1/3" />
-      <div className="h-32 bg-slate-100 rounded" />
+      <div className="h-4 bg-neutral-100 rounded w-1/3" />
+      <div className="h-32 bg-neutral-100 rounded" />
       <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-8 bg-slate-100 rounded" />
+          <div key={i} className="h-8 bg-neutral-100 rounded" />
         ))}
       </div>
     </div>
@@ -179,13 +179,13 @@ export default function PrivatePropertyPanel() {
   }, [records, segment, sortBy]);
 
   return (
-    <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <section className="bg-white rounded-3xl shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="px-4 sm:px-5 py-4 border-b border-slate-100">
+      <div className="px-4 sm:px-5 py-4 border-b border-neutral-100">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="font-bold text-slate-900">🏙️ Private Property Transactions</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Singapore condos · last 300 transactions</p>
+            <h2 className="font-bold text-neutral-900">🏙️ Private Property Transactions</h2>
+            <p className="text-xs text-neutral-400 mt-0.5">Singapore condos · last 300 transactions</p>
           </div>
           {!loading && (
             <span className={`text-xs px-2.5 py-1 rounded-full font-medium border shrink-0 ${
@@ -208,7 +208,7 @@ export default function PrivatePropertyPanel() {
           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <p className="text-sm font-semibold text-red-700 mb-1">Failed to load data</p>
             <p className="text-xs text-red-500 font-mono break-all">{error}</p>
-            <p className="text-xs text-slate-500 mt-2">
+            <p className="text-xs text-neutral-500 mt-2">
               Source: data.gov.sg — resource 42ff9c2b-3a03-4c8c-9e4c-9e7f5c1b0cbb
             </p>
           </div>
@@ -224,7 +224,7 @@ export default function PrivatePropertyPanel() {
           </div>
 
           {/* Summary stats */}
-          <div className="grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100 mb-0">
+          <div className="grid grid-cols-3 divide-x divide-neutral-100 border-t border-neutral-100 mb-0">
             {(["OCR", "RCR", "CCR"] as const).map((seg) => {
               const segRecs = records.filter((r) => r.marketSegment === seg);
               if (!segRecs.length) return null;
@@ -233,32 +233,32 @@ export default function PrivatePropertyPanel() {
               );
               return (
                 <div key={seg} className="px-3 py-2.5 text-center">
-                  <p className="text-xs font-semibold text-slate-400">{seg}</p>
-                  <p className="text-sm font-bold text-slate-900 mt-0.5">S${fmt(avgPsm)}</p>
-                  <p className="text-xs text-slate-400">avg $/sqm</p>
+                  <p className="text-xs font-semibold text-neutral-400">{seg}</p>
+                  <p className="text-sm font-bold text-neutral-900 mt-0.5">S${fmt(avgPsm)}</p>
+                  <p className="text-xs text-neutral-400">avg $/sqm</p>
                 </div>
               );
             })}
           </div>
 
           {/* Filters */}
-          <div className="px-4 py-3 border-t border-slate-100 flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-500">Segment:</span>
+          <div className="px-4 py-3 border-t border-neutral-100 flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-neutral-500">Segment:</span>
             {(["", "OCR", "RCR", "CCR"] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setSegment(s)}
                 className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                   segment === s
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "border-slate-200 text-slate-500 hover:border-slate-300"
+                    ? "bg-neutral-900 text-white border-neutral-900"
+                    : "border-neutral-200 text-neutral-500 hover:border-neutral-300"
                 }`}
               >
                 {s || "All"}
               </button>
             ))}
             <div className="ml-auto flex gap-1.5 flex-wrap items-center">
-              <span className="text-xs font-semibold text-slate-500">Sort:</span>
+              <span className="text-xs font-semibold text-neutral-500">Sort:</span>
               {([["date", "Latest"], ["price", "Price ↓"], ["psm", "$/sqm ↓"]] as const).map(
                 ([val, label]) => (
                   <button
@@ -266,8 +266,8 @@ export default function PrivatePropertyPanel() {
                     onClick={() => setSortBy(val)}
                     className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
                       sortBy === val
-                        ? "bg-slate-900 text-white border-slate-900"
-                        : "border-slate-200 text-slate-500 hover:border-slate-300"
+                        ? "bg-neutral-900 text-white border-neutral-900"
+                        : "border-neutral-200 text-neutral-500 hover:border-neutral-300"
                     }`}
                   >
                     {label}
@@ -281,15 +281,15 @@ export default function PrivatePropertyPanel() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[540px] text-xs">
               <thead>
-                <tr className="bg-slate-50 border-t border-b border-slate-100">
-                  <th className="text-left px-4 py-2.5 font-semibold text-slate-500">Project</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-slate-500">Seg</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-slate-500">D</th>
-                  <th className="text-right px-3 py-2.5 font-semibold text-slate-500 whitespace-nowrap">Price</th>
-                  <th className="text-right px-3 py-2.5 font-semibold text-slate-500">sqm</th>
-                  <th className="text-right px-3 py-2.5 font-semibold text-slate-500 whitespace-nowrap">$/sqm</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-slate-500">Tenure</th>
-                  <th className="text-left px-3 py-2.5 font-semibold text-slate-500">Date</th>
+                <tr className="bg-slate-50 border-t border-b border-neutral-100">
+                  <th className="text-left px-4 py-2.5 font-semibold text-neutral-500">Project</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-neutral-500">Seg</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-neutral-500">D</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-neutral-500 whitespace-nowrap">Price</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-neutral-500">sqm</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-neutral-500 whitespace-nowrap">$/sqm</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-neutral-500">Tenure</th>
+                  <th className="text-left px-3 py-2.5 font-semibold text-neutral-500">Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -303,7 +303,7 @@ export default function PrivatePropertyPanel() {
                         {r.marketSegment}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-slate-500">{r.district}</td>
+                    <td className="px-3 py-2.5 text-neutral-500">{r.district}</td>
                     <td className="px-3 py-2.5 text-right font-semibold text-slate-800 whitespace-nowrap">
                       {fmtM(r.price)}
                     </td>
@@ -311,17 +311,17 @@ export default function PrivatePropertyPanel() {
                     <td className="px-3 py-2.5 text-right text-slate-700 font-medium whitespace-nowrap">
                       S${fmt(r.pricePerSqm)}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap max-w-[100px] truncate" title={r.tenure}>
+                    <td className="px-3 py-2.5 text-neutral-500 whitespace-nowrap max-w-[100px] truncate" title={r.tenure}>
                       {r.tenure}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-400 whitespace-nowrap">{r.transactionDate}</td>
+                    <td className="px-3 py-2.5 text-neutral-400 whitespace-nowrap">{r.transactionDate}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div className="px-4 py-3 border-t border-slate-50 text-xs text-slate-400 flex flex-wrap justify-between gap-1">
+          <div className="px-4 py-3 border-t border-slate-50 text-xs text-neutral-400 flex flex-wrap justify-between gap-1">
             <span>Showing {filtered.length} of {records.length} transactions</span>
             <span>Source: data.gov.sg · resource 42ff9c2b</span>
           </div>
