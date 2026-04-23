@@ -251,13 +251,12 @@ export default function AssessmentPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Floor Level</label>
-                  <div className="relative">
-                    <select name="floor" value={form.floor} onChange={handleSelect} className={selectCls}>
-                      <option value="">Select</option>
-                      {FLOORS.map((f) => <option key={f} value={f}>Floor {f}</option>)}
-                    </select>
-                    <ChevronDown />
-                  </div>
+                  <input
+                    type="text" inputMode="numeric" name="floor"
+                    value={form.floor} onChange={handleNum}
+                    placeholder="e.g. 12"
+                    className={inputCls}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Floor Area (sqm)</label>

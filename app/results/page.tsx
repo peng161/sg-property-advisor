@@ -319,6 +319,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           myFlatType={input.flatType}
           myFloor={input.floor}
           mySqm={input.sqm}
+          myRemainingLease={remainingLease > 0 ? remainingLease : undefined}
           source={hdbSource}
         />
 
