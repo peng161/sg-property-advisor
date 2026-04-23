@@ -5,14 +5,8 @@ import { geocodePostal } from "@/lib/geocode";
 import { getTransactions as getMockHdb } from "@/lib/mockTransactions";
 import NearbyHdbPanel from "@/components/NearbyHdbPanel";
 import PrivatePropertyPanel from "@/components/PrivatePropertyPanel";
+import UpgradeOptionsCarousel from "@/components/UpgradeOptionsCarousel";
 import Link from "next/link";
-
-const OPTION_STYLE: Record<string, { icon: string; bg: string }> = {
-  "Stay":          { icon: "🏠", bg: "bg-stone-100"   },
-  "Bigger HDB":    { icon: "📈", bg: "bg-sky-50"      },
-  "EC":            { icon: "🏙️", bg: "bg-violet-50"   },
-  "Private Condo": { icon: "✨", bg: "bg-amber-50"    },
-};
 
 function fmtShort(n: number) {
   return n >= 1_000_000
@@ -61,22 +55,30 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     sellingFirst:  params.sellingFirst !== "no",
   };
 
-  const remainingLease = input.leaseYear > 0
-    ? Math.max(0, 99 - (new Date().getFullYear() - input.leaseYear))
-    : 0;
-
   const [hdb, privatePrices, hdbTx] = await Promise.all([
     fetchHdbPrices(town),
     fetchPrivatePrices(),
     town ? fetchHdbTransactions(town) : Promise.resolve([]),
   ]);
 
+  // Auto-detect lease year from HDB transactions matching the geocoded block.
+  // Falls back to any manually-passed leaseYear for backward compatibility.
+  const matchingTx = geoAddress
+    ? hdbTx.find((t) => {
+        const geoBlock = geoAddress.match(/^(?:BLK\s+)?(\S+)/i)?.[1] ?? "";
+        return t.block.trim().toUpperCase() === geoBlock.trim().toUpperCase();
+      })
+    : undefined;
+  const autoLeaseYear = matchingTx?.leaseCommenceYear ?? input.leaseYear;
+  const remainingLease = autoLeaseYear > 0
+    ? Math.max(0, 99 - (new Date().getFullYear() - autoLeaseYear))
+    : 0;
+
   const nearbyHdb  = hdbTx.length > 0 ? hdbTx : [];
   const mockNearby = getMockHdb(town);
   const hdbSource  = hdbTx.length > 0 ? "live" : "mock";
 
   const result = assess(input, { hdb, private: privatePrices });
-  const recStyle = OPTION_STYLE[result.recommendation] ?? OPTION_STYLE["Stay"];
   const gainPositive = result.capitalGain >= 0;
 
   return (
@@ -288,124 +290,12 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        {/* ── Upgrade options ── */}
-        <div>
-          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-3 px-1">
-            All Options
-          </p>
-          <div className="space-y-3">
-            {result.options.map((option) => {
-              const style = OPTION_STYLE[option.type] ?? OPTION_STYLE["Stay"];
-              const isRec = option.type === result.recommendation;
-              const costs = option.costs;
-              return (
-                <div
-                  key={option.type}
-                  className={`bg-white rounded-3xl overflow-hidden shadow-sm transition-shadow hover:shadow-md ${
-                    isRec
-                      ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-[#D9E4D7]"
-                      : ""
-                  }`}
-                >
-                  {isRec && (
-                    <div className="bg-amber-400 px-5 py-1.5">
-                      <span className="text-white text-[11px] font-bold">★ Recommended for you</span>
-                    </div>
-                  )}
-                  <div className="p-5">
-                    <div className="flex items-start justify-between mb-4 gap-2 flex-wrap">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-11 h-11 rounded-2xl ${style.bg} flex items-center justify-center text-xl shrink-0`}
-                        >
-                          {style.icon}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-neutral-900">{option.label}</h3>
-                          <p className="text-xs text-neutral-400 mt-0.5">{option.priceRange}</p>
-                        </div>
-                      </div>
-                      <span
-                        className={`text-[11px] font-bold px-3 py-1 rounded-full shrink-0 ${
-                          option.affordable
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-red-50 text-red-500"
-                        }`}
-                      >
-                        {option.affordable ? "✓ Affordable" : "✗ Out of range"}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      <div className="bg-neutral-50 rounded-2xl p-3">
-                        <p className="text-[10px] text-neutral-400 uppercase tracking-wider mb-1">
-                          Est. Price
-                        </p>
-                        <p className="text-sm font-bold text-neutral-900">{option.priceRange}</p>
-                      </div>
-                      <div className="bg-neutral-50 rounded-2xl p-3">
-                        <p className="text-[10px] text-neutral-400 uppercase tracking-wider mb-1">
-                          Monthly
-                        </p>
-                        <p className="text-sm font-bold text-neutral-900">
-                          {option.monthlyRepayment}
-                        </p>
-                      </div>
-                    </div>
-
-                    {option.type !== "Stay" && costs.total > 0 && (
-                      <div className="bg-neutral-50 rounded-2xl overflow-hidden mb-4">
-                        <div className="px-4 py-2.5 border-b border-neutral-100">
-                          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
-                            Upfront Cost Breakdown
-                          </p>
-                        </div>
-                        <div className="px-4 divide-y divide-neutral-100">
-                          {[
-                            { label: "Down payment",   value: costs.downPayment             },
-                            { label: "BSD",            value: costs.bsd                     },
-                            { label: "ABSD",           value: costs.absd, hi: costs.absd > 0 },
-                            { label: "Agent fee (1%)", value: costs.agentFee                },
-                            { label: "Legal fees",     value: costs.legalFee                },
-                          ].map((r) => (
-                            <div key={r.label} className="flex justify-between py-2">
-                              <span className="text-xs text-neutral-400">{r.label}</span>
-                              <span
-                                className={`text-xs font-semibold ${
-                                  "hi" in r && r.hi ? "text-orange-500" : "text-neutral-700"
-                                }`}
-                              >
-                                {r.value === 0 ? (
-                                  <span className="text-neutral-300">—</span>
-                                ) : (
-                                  `S$${fmt(r.value)}`
-                                )}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="px-4 py-3 bg-neutral-900 flex justify-between items-center">
-                          <span className="text-xs font-bold text-white">Total Upfront</span>
-                          <span
-                            className={`text-sm font-black ${
-                              result.netProceeds >= costs.total
-                                ? "text-emerald-400"
-                                : "text-red-400"
-                            }`}
-                          >
-                            S${fmt(costs.total)}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    <p className="text-xs text-neutral-400 leading-relaxed">{option.notes}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        {/* ── Upgrade options carousel ── */}
+        <UpgradeOptionsCarousel
+          options={result.options}
+          recommendation={result.recommendation}
+          netProceeds={result.netProceeds}
+        />
 
         {/* ── Nearby HDB ── */}
         <NearbyHdbPanel

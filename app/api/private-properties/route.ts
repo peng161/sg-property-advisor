@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server";
 import { fetchDataGovPrivate, type PrivateRecord } from "@/lib/fetchDataGovPrivate";
+import { MOCK_PRIVATE_TRANSACTIONS } from "@/lib/mockPrivateTransactions";
 
-// Keep stale records so a 429 can still serve something
 let CACHE: { records: PrivateRecord[]; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — reduces hit rate on data.gov.sg
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 export const revalidate = 1800;
 
@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
   const segment  = sp.get("segment") ?? "";
 
   const now = Date.now();
+  let source = "data.gov.sg";
 
   if (!CACHE || now > CACHE.expiresAt) {
     try {
@@ -25,15 +26,15 @@ export async function GET(request: NextRequest) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[private-properties] fetch failed:", msg);
 
-      // Serve stale cache rather than an empty error when rate-limited
       if (CACHE && CACHE.records.length > 0) {
-        console.warn("[private-properties] serving stale cache after fetch failure");
-        // Don't update CACHE so the next request retries sooner
+        // Serve previous live data, retry next request
+        console.warn("[private-properties] serving stale cache");
+        source = "data.gov.sg (cached)";
       } else {
-        return Response.json(
-          { error: msg, source: "error", transactions: [], total: 0 },
-          { status: 502 },
-        );
+        // No cache at all — serve mock data so the UI stays useful
+        console.warn("[private-properties] no cache available, serving mock data");
+        CACHE = { records: MOCK_PRIVATE_TRANSACTIONS, expiresAt: now + CACHE_TTL_MS };
+        source = "sample data";
       }
     }
   }
@@ -47,11 +48,5 @@ export async function GET(request: NextRequest) {
   if (segment === "CCR" || segment === "RCR" || segment === "OCR")
     data = data.filter((r) => r.marketSegment === segment);
 
-  const stale = CACHE!.expiresAt < now;
-
-  return Response.json({
-    total:        data.length,
-    source:       stale ? "data.gov.sg (cached)" : "data.gov.sg",
-    transactions: data,
-  });
+  return Response.json({ total: data.length, source, transactions: data });
 }

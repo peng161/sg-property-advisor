@@ -270,28 +270,6 @@ export default function AssessmentPage() {
                 </div>
               </div>
 
-              {/* Lease commence year */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Lease Commence Year
-                  <span className="text-slate-400 font-normal ml-1 text-xs">— check your title deed or HDB portal</span>
-                </label>
-                <div className="relative">
-                  <select name="leaseYear" value={form.leaseYear} onChange={handleSelect} className={selectCls}>
-                    <option value="">Select (optional)</option>
-                    {Array.from({ length: 56 }, (_, i) => 1966 + i).reverse().map((y) => (
-                      <option key={y} value={y}>{y} · {99 - (CURRENT_YEAR - y)} yrs left</option>
-                    ))}
-                  </select>
-                  <ChevronDown />
-                </div>
-                {form.leaseYear && (
-                  <p className="text-xs text-slate-500 mt-1">
-                    Approx. <span className="font-semibold text-slate-700">{99 - (CURRENT_YEAR - Number(form.leaseYear))} years</span> remaining on your lease
-                  </p>
-                )}
-              </div>
-
               {/* Purchase price + year */}
               <div className="grid grid-cols-2 gap-3">
                 <div>

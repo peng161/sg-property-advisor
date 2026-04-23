@@ -60,7 +60,7 @@ async function fetchOnce(): Promise<Response> {
       Accept: "application/json",
       "User-Agent": "sg-property-advisor/1.0 (Next.js app)",
     },
-    next: { revalidate: 1800 },
+    cache: "no-store", // caching is handled in the API route, not here
   });
 }
 
