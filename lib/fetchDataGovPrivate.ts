@@ -54,12 +54,25 @@ interface RawRow {
   [k: string]: unknown;
 }
 
-export async function fetchDataGovPrivate(): Promise<PrivateRecord[]> {
-  const res = await fetch(API_URL, {
-    headers: { Accept: "application/json" },
-    // next.js: cache for 5 minutes so repeated server renders don't refetch
-    next: { revalidate: 300 },
+async function fetchOnce(): Promise<Response> {
+  return fetch(API_URL, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "sg-property-advisor/1.0 (Next.js app)",
+    },
+    next: { revalidate: 1800 },
   });
+}
+
+export async function fetchDataGovPrivate(): Promise<PrivateRecord[]> {
+  let res = await fetchOnce();
+
+  // Single retry after a short pause when rate-limited
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get("Retry-After") ?? 3) * 1000;
+    await new Promise((r) => setTimeout(r, Math.min(retryAfter, 5000)));
+    res = await fetchOnce();
+  }
 
   if (!res.ok) {
     throw new Error(

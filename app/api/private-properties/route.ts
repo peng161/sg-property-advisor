@@ -1,12 +1,11 @@
 import { type NextRequest } from "next/server";
 import { fetchDataGovPrivate, type PrivateRecord } from "@/lib/fetchDataGovPrivate";
 
-// In-memory cache — survives across requests in the same warm serverless instance
+// Keep stale records so a 429 can still serve something
 let CACHE: { records: PrivateRecord[]; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — reduces hit rate on data.gov.sg
 
-// Also tell Vercel CDN to cache the response for 5 minutes
-export const revalidate = 300;
+export const revalidate = 1800;
 
 export async function GET(request: NextRequest) {
   const sp       = request.nextUrl.searchParams;
@@ -14,8 +13,8 @@ export async function GET(request: NextRequest) {
   const maxPrice = Number(sp.get("maxPrice") ?? 0);
   const segment  = sp.get("segment") ?? "";
 
-  // Serve from in-memory cache if still fresh
   const now = Date.now();
+
   if (!CACHE || now > CACHE.expiresAt) {
     try {
       console.log("[private-properties] fetching from data.gov.sg…");
@@ -25,28 +24,34 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[private-properties] fetch failed:", msg);
-      return Response.json(
-        { error: msg, source: "error", transactions: [] },
-        { status: 502 }
-      );
+
+      // Serve stale cache rather than an empty error when rate-limited
+      if (CACHE && CACHE.records.length > 0) {
+        console.warn("[private-properties] serving stale cache after fetch failure");
+        // Don't update CACHE so the next request retries sooner
+      } else {
+        return Response.json(
+          { error: msg, source: "error", transactions: [], total: 0 },
+          { status: 502 },
+        );
+      }
     }
   }
 
-  let data = CACHE.records;
+  let data = CACHE!.records;
 
-  if (minYear > 0) {
+  if (minYear > 0)
     data = data.filter((r) => Number(r.transactionDate.slice(0, 4)) >= minYear);
-  }
-  if (maxPrice > 0) {
+  if (maxPrice > 0)
     data = data.filter((r) => r.price <= maxPrice);
-  }
-  if (segment === "CCR" || segment === "RCR" || segment === "OCR") {
+  if (segment === "CCR" || segment === "RCR" || segment === "OCR")
     data = data.filter((r) => r.marketSegment === segment);
-  }
+
+  const stale = CACHE!.expiresAt < now;
 
   return Response.json({
     total:        data.length,
-    source:       "data.gov.sg",
+    source:       stale ? "data.gov.sg (cached)" : "data.gov.sg",
     transactions: data,
   });
 }
