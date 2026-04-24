@@ -184,6 +184,8 @@ export async function getPrivateProjectsNearby(
       propertyScore,
       trend3Y:       doc.trend3Y ?? 0,
       distanceKm:    distKm,
+      projectLat:    docLat,
+      projectLng:    docLng,
     };
   });
 

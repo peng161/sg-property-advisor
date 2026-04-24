@@ -298,6 +298,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           propertyScore: score,
           trend3Y:       projectTrend3Y(b.txs),
           distanceKm:    distKm,
+          projectLat:    centroid ? centroid[0] : null,
+          projectLng:    centroid ? centroid[1] : null,
         };
       })
       .sort((a, b) => b.propertyScore - a.propertyScore || (a.distanceKm ?? 99) - (b.distanceKm ?? 99))

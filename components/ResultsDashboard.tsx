@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
+
+const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,6 +25,8 @@ export interface ExtendedProjectSummary {
   propertyScore: number;
   trend3Y:       number;
   distanceKm:    number | null;
+  projectLat:    number | null;
+  projectLng:    number | null;
 }
 
 export interface EcSummary {
@@ -485,58 +490,34 @@ function PropertyCard({
   );
 }
 
-// ── MapPanel ──────────────────────────────────────────────────────────────────
+// ── MapWrapper ────────────────────────────────────────────────────────────────
 
-function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCode: string }) {
-  const hasCoords = lat > 0 && lng > 0;
-
-  // OpenStreetMap embed — no API key required
-  const delta = 0.008; // ~900m bounding box radius
-  const src = hasCoords
-    ? `https://www.openstreetmap.org/export/embed.html` +
-      `?bbox=${lng - delta},${lat - delta},${lng + delta},${lat + delta}` +
-      `&layer=mapnik&marker=${lat},${lng}`
-    : "";
-
+function MapWrapper({
+  lat, lng, postalCode, properties, selectedProject, onSelectProject,
+}: {
+  lat: number; lng: number; postalCode: string;
+  properties: ExtendedProjectSummary[];
+  selectedProject: string | null;
+  onSelectProject: (project: string) => void;
+}) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ minHeight: 420 }}>
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div>
           <p className="font-semibold text-slate-800 text-sm">Property Map</p>
-          <p className="text-[10px] text-slate-400">Your neighbourhood</p>
+          <p className="text-[10px] text-slate-400">Your neighbourhood · 1.5 km radius</p>
         </div>
         <div className="text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
           Postal: {postalCode || "—"}
         </div>
       </div>
-
       <div className="flex-1 relative" style={{ minHeight: 360 }}>
-        {src ? (
-          <iframe
-            src={src}
-            className="w-full h-full border-0 absolute inset-0"
-            style={{ minHeight: 360 }}
-            title="OpenStreetMap — Property Location"
-            allowFullScreen
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 gap-3 px-6 text-center" style={{ minHeight: 360 }}>
-            <span className="text-3xl">🗺️</span>
-            <p className="text-sm font-semibold text-slate-600">No location data</p>
-            <p className="text-xs text-slate-400">Enter a postal code on the assessment form to load the map.</p>
-          </div>
-        )}
-      </div>
-
-      <div className="px-4 py-2 border-t border-slate-100 flex gap-4 flex-wrap">
-        {[
-          { icon: "🏠", label: "Your Home" },
-          { icon: "🗺️", label: "© OpenStreetMap contributors" },
-        ].map(({ icon, label }) => (
-          <div key={label} className="flex items-center gap-1 text-[9px] text-slate-500">
-            <span>{icon}</span><span>{label}</span>
-          </div>
-        ))}
+        <LeafletMap
+          lat={lat} lng={lng} postalCode={postalCode}
+          properties={properties}
+          selectedProject={selectedProject}
+          onSelectProject={onSelectProject}
+        />
       </div>
     </div>
   );
@@ -559,6 +540,9 @@ export default function ResultsDashboard({
 
   // Upgrade path card state
   const [selectedUpgrade, setSelectedUpgrade] = useState(assessment.recommendation);
+
+  // Map selected property
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   const defaultBr = defaultBrFromChildren(numChildren);
 
@@ -956,7 +940,12 @@ export default function ResultsDashboard({
 
             {/* Map panel */}
             <div className="w-80 shrink-0">
-              <MapPanel lat={lat} lng={lng} postalCode={postalCode} />
+              <MapWrapper
+                lat={lat} lng={lng} postalCode={postalCode}
+                properties={displayedListings}
+                selectedProject={selectedProject}
+                onSelectProject={setSelectedProject}
+              />
             </div>
           </div>
 
