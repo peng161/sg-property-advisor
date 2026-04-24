@@ -10,7 +10,7 @@ import { PrivateProject } from "./models/PrivateProject";
 import type { HdbResaleRecord } from "./fetchHdb";
 import type { ExtendedProjectSummary } from "@/components/ResultsDashboard";
 
-const MAX_DIST_M = 1500; // 1.5 km
+const NEARBY_DIST_M = 1500; // 1.5 km — preferred range, used as bonus not hard cutoff
 
 // ── Geo helper ────────────────────────────────────────────────────────────────
 
@@ -62,8 +62,14 @@ function scorePrivateProject(
 ): number {
   let score = 30; // base
 
-  // Distance within 1.5 km — critical factor (0-30)
-  score += distKm < 0.5 ? 30 : distKm < 1 ? 24 : 16;
+  // Distance — decays gradually across Singapore (0-30)
+  score += distKm < 0.5 ? 30
+         : distKm < 1   ? 26
+         : distKm < 2   ? 22
+         : distKm < 5   ? 16
+         : distKm < 10  ? 10
+         : distKm < 20  ? 5
+         : 2;
 
   // Affordability (0-18)
   score += minPrice <= budget ? 18 : minPrice <= budget * 1.1 ? 10 : 3;
@@ -101,7 +107,7 @@ export async function getHdbNearby(
     location: {
       $near: {
         $geometry: { type: "Point", coordinates: [lng, lat] },
-        $maxDistance: MAX_DIST_M,
+        $maxDistance: NEARBY_DIST_M,
       },
     },
     flatType,
@@ -145,18 +151,23 @@ export async function getPrivateProjectsNearby(
   const db = await connectDb();
   if (!db) return { projects: [], fromDb: false, count: 0 };
 
+  // No $maxDistance — distance is a score factor, not a hard filter.
+  // This ensures freehold/999yr condos (concentrated in CCR/RCR) are included
+  // even when the user's home is in an OCR HDB block far from prime districts.
   const docs = await PrivateProject.find({
     location: {
       $near: {
         $geometry: { type: "Point", coordinates: [lng, lat] },
-        $maxDistance: MAX_DIST_M,
       },
     },
   })
-    .limit(60)
+    .limit(200)
     .lean();
 
-  const total = docs.length;
+  const total = docs.filter((doc) => {
+    const [docLng, docLat] = (doc.location as { coordinates: number[] }).coordinates;
+    return haversineKm(lat, lng, docLat, docLng) <= NEARBY_DIST_M / 1000;
+  }).length;
 
   const scored: ExtendedProjectSummary[] = docs.map((doc) => {
     const [docLng, docLat] = (doc.location as { coordinates: number[] }).coordinates;

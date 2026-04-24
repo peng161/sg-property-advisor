@@ -156,19 +156,28 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
     if (tokenJson.Status !== "Success") throw new Error("URA token failed");
     const token = tokenJson.Result;
 
-    const condoTypes = new Set(["Condominium", "Apartment"]);
+    const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
     const all: PrivateTx[] = [];
+    const cutoffYear = CURRENT_YEAR - 5;
 
-    for (const batch of [1, 2, 3, 4]) {
+    // URA batches — each covers ~6 months. Try 1-10 to get ~5 years; stop on consecutive failures.
+    let consecutive = 0;
+    for (let batch = 1; batch <= 10; batch++) {
       process.stdout.write(`  Fetching URA batch ${batch}... `);
       try {
         const res = await fetch(
           `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${batch}`,
-          { headers: { AccessKey: accessKey, Token: token } }
+          { headers: { AccessKey: accessKey, Token: token }, signal: AbortSignal.timeout(30000) }
         );
         const json = await res.json() as { Status: string; Result: { project: string; street: string; district: string; marketSegment: string; propertyType: string; tenure: string; price: string; area: string; contractDate: string }[] };
-        if (json.Status !== "Success") throw new Error("bad status");
+        if (json.Status !== "Success" || !Array.isArray(json.Result)) {
+          console.log(`no data`);
+          if (++consecutive >= 2) break;
+          continue;
+        }
+        consecutive = 0;
 
+        let batchCount = 0;
         for (const raw of json.Result) {
           if (!condoTypes.has(raw.propertyType)) continue;
           const price = Number(raw.price);
@@ -177,6 +186,7 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
           const yy   = raw.contractDate.slice(0, 2);
           const mm   = raw.contractDate.slice(2, 4);
           const year = Number(yy) < 50 ? `20${yy}` : `19${yy}`;
+          if (Number(year) < cutoffYear) continue; // skip older than 5 years
           const seg  = (raw.marketSegment ?? "OCR").toUpperCase();
           all.push({
             project:       raw.project,
@@ -189,11 +199,13 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
             pricePerSqm:   Math.round(price / sqm),
             contractDate:  `${year}-${mm}`,
           });
+          batchCount++;
         }
-        console.log(`${json.Result.length} txs`);
-        await sleep(500);
+        console.log(`${batchCount} txs (${json.Result.length} raw)`);
+        await sleep(600);
       } catch (e) {
         console.log(`failed: ${e}`);
+        if (++consecutive >= 2) break;
       }
     }
     return all;

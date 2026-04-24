@@ -76,7 +76,7 @@ function computePropertyScore(
 
 // Layer 1 scoring — upgrade path assessment (financial affordability)
 function computeOptionScore(
-  type: string, affordable: boolean, gainPct: number, leaseKnown: boolean, remainingLease: number
+  type: string, affordable: boolean, gainPct: number, remainingLease: number
 ): number {
   const base: Record<string, number> = {
     Stay: 32, "Bigger HDB": 52, EC: 67, "Private Condo": 72,
@@ -84,11 +84,8 @@ function computeOptionScore(
   let s = base[type] ?? 50;
   if (affordable) s += 18;
   if (gainPct > 50) s += 5; else if (gainPct > 20) s += 3;
-  if (leaseKnown) {
-    if (remainingLease >= 75) s += 5;
-    else if (remainingLease >= 60) s += 2;
-  }
-  // No penalty when lease is unknown — don't penalise what we can't know
+  if (remainingLease >= 75) s += 5;
+  else if (remainingLease >= 60) s += 2;
   return Math.min(Math.round(s), 99);
 }
 
@@ -178,7 +175,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const leaseKnown = leaseCommencementYear > 0 && leaseCommencementYear < currentYear;
   const remainingLease = leaseKnown
     ? Math.max(0, 99 - (currentYear - leaseCommencementYear))
-    : 0;
+    : 95; // default assumption when lease year cannot be determined
 
   // ── Nearby market value (only when lease is known) ────────────────────────
 
@@ -205,7 +202,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   // ── Layer 1: Upgrade path scores (financial affordability) ───────────────
 
   const optionScores = result.options.map((o) =>
-    computeOptionScore(o.type, o.affordable, gainPct, leaseKnown, remainingLease)
+    computeOptionScore(o.type, o.affordable, gainPct, remainingLease)
   );
 
   // ── Layer 2: Private property recommendations (distance-first) ────────────
@@ -217,7 +214,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   let dbProjectCount = 0;
 
   if (hasUserCoords && isMongoConfigured()) {
-    const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 7);
+    const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 30);
     if (fromDb && projects.length > 0) {
       privateListings = projects;
       dbUsed = true;
@@ -248,7 +245,6 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     };
     const byProject = new Map<string, ProjectBucket>();
     for (const t of privateTx) {
-      if (t.marketSegment !== userSegment) continue;
       const b = byProject.get(t.project);
       if (!b) {
         byProject.set(t.project, { txs: [t], min: t.price, max: t.price, psms: [t.pricePerSqm], sqms: [t.sqm] });
@@ -303,7 +299,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         };
       })
       .sort((a, b) => b.propertyScore - a.propertyScore || (a.distanceKm ?? 99) - (b.distanceKm ?? 99))
-      .slice(0, 7);
+      .slice(0, 30);
   }
 
   // ── HDB: same flat type nearby (for "Stay" path) ──────────────────────────

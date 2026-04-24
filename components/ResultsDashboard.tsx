@@ -545,7 +545,7 @@ export default function ResultsDashboard({
 
   const defaultBr = defaultBrFromChildren(numChildren);
 
-  // Private Condo listings — filtered by tenure
+  // Private Condo listings — filtered by tenure, capped at 7
   const displayedListings = selectedUpgrade === "Private Condo"
     ? privateListings.filter((p) => {
         if (tenureFilter === "All") return true;
@@ -553,7 +553,7 @@ export default function ResultsDashboard({
         if (tenureFilter === "999yr")    return p.tenure.includes("999");
         // 99yr: anything that isn't freehold or 999-year
         return !p.tenure.toLowerCase().includes("freehold") && !p.tenure.includes("999");
-      })
+      }).slice(0, 7)
     : [];
 
   const recIdx = assessment.options.findIndex((o) => o.type === assessment.recommendation);
@@ -710,7 +710,7 @@ export default function ResultsDashboard({
                 { label: "Max Bank Loan", value: fmtM(assessment.maxBankLoan) },
                 {
                   label: "Remaining Lease",
-                  value: leaseKnown ? `${remainingLease} yrs` : "Unknown",
+                  value: leaseKnown ? `${remainingLease} yrs` : "≥95 yrs (est.)",
                 },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between items-start">
@@ -755,7 +755,7 @@ export default function ResultsDashboard({
                   ["Postal Code", debugInfo.postalCode || "—"],
                   ["Lat/Lng", debugInfo.lat ? `${debugInfo.lat.toFixed(5)}, ${debugInfo.lng.toFixed(5)}` : "Not geocoded"],
                   ["Lease Commence Year", debugInfo.leaseKnown ? `${debugInfo.leaseCommencementYear}` : "Unknown"],
-                  ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "Unknown — not penalised"],
+                  ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "95 yrs (defaulted)"],
                   ["HDB Txns Fetched", `${debugInfo.hdbTxCount}`],
                   ["Private Projects", `${debugInfo.privateProjectCount}`],
                   ["Within 1.5 km (DB)", debugInfo.mongoConfigured ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A (no DB)"],
@@ -776,19 +776,6 @@ export default function ResultsDashboard({
         {/* ── Main content ── */}
         <main className="flex-1 overflow-x-hidden p-4 space-y-4 min-w-0">
 
-          {/* Lease unknown warning */}
-          {!leaseKnown && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
-              <span className="text-amber-500 text-base shrink-0">⚠</span>
-              <div>
-                <p className="text-xs font-semibold text-amber-800">Lease commencement year not found</p>
-                <p className="text-[11px] text-amber-600 mt-0.5">
-                  Enter your lease commencement year in the assessment form, or ensure you have a postal code.
-                  Lease scores are excluded from path assessment until this is known.
-                </p>
-              </div>
-            </div>
-          )}
 
           {/* ── Section 1: Upgrade Path Assessment ── */}
           <section className="bg-white rounded-xl border border-slate-200 p-5">
