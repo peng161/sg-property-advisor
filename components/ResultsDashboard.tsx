@@ -1,0 +1,846 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
+import type { HdbResaleRecord } from "@/lib/fetchHdb";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface ExtendedProjectSummary {
+  project:       string;
+  street:        string;
+  tenure:        string;
+  marketSegment: "OCR" | "RCR" | "CCR";
+  minPrice:      number;
+  maxPrice:      number;
+  medianPsm:     number;
+  txCount:       number;
+  latestDate:    string;
+  minSqm:        number;
+  maxSqm:        number;
+  propertyScore: number;
+  trend3Y:       number;
+}
+
+export interface EcSummary {
+  name:     string;
+  price:    number;
+  location: string;
+  bedrooms: string;
+}
+
+export interface DashboardProps {
+  assessment:       AssessmentResult;
+  optionScores:     number[];
+  gainPct:          number;
+  remainingLease:   number;
+  displayAddress:   string;
+  postalCode:       string;
+  numChildren:      number;
+  lat:              number;
+  lng:              number;
+  flatType:         string;
+  town:             string;
+  sqm:              number;
+  purchaseYear:     number;
+  purchasePrice:    number;
+  remainingLoan:    number;
+  sellingFirst:     boolean;
+  privateListings:  ExtendedProjectSummary[];
+  ecListings:       EcSummary[];
+  biggerHdbListings: HdbResaleRecord[];
+  nextFlatType:     string | null;
+}
+
+// ── Bedroom helpers ───────────────────────────────────────────────────────────
+
+type BrId = "3BR" | "4BR" | "2BR" | "1BR";
+const BR_DEFS: { id: BrId; label: string; sqmLow: number; sqmHigh: number }[] = [
+  { id: "3BR", label: "3BR", sqmLow: 88,  sqmHigh: 108 },
+  { id: "4BR", label: "4BR", sqmLow: 115, sqmHigh: 140 },
+  { id: "2BR", label: "2BR", sqmLow: 60,  sqmHigh: 80  },
+  { id: "1BR", label: "1BR", sqmLow: 42,  sqmHigh: 55  },
+];
+
+function defaultBrFromChildren(n: number): BrId {
+  return n >= 1 ? "3BR" : "2BR";
+}
+
+function fmt(n: number) { return n.toLocaleString("en-SG"); }
+function fmtM(n: number) {
+  return n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(2)}M` : `$${(n / 1_000).toFixed(0)}K`;
+}
+
+function estimateMortgage(price: number): number {
+  const loan = price * 0.75;
+  const r = 0.035 / 12;
+  const n = 300;
+  return Math.round(loan * r * Math.pow(1 + r, n) / (Math.pow(1 + r, n) - 1));
+}
+
+function familySuitability(br: BrId, numChildren: number): { label: string; color: string } {
+  if (numChildren === 0) {
+    return br === "1BR" ? { label: "Good for Couple", color: "text-emerald-600" } : { label: "Good", color: "text-emerald-600" };
+  }
+  if (br === "4BR") return { label: "Excellent", color: "text-emerald-600" };
+  if (br === "3BR") return numChildren >= 3 ? { label: "Excellent", color: "text-emerald-600" } : { label: "Very Good", color: "text-emerald-600" };
+  if (br === "2BR") return numChildren >= 3 ? { label: "Poor", color: "text-red-500" } : { label: "Fair", color: "text-amber-600" };
+  return { label: "Not Suitable", color: "text-red-500" };
+}
+
+function unitTypeScore(propertyScore: number, br: BrId, numChildren: number): number {
+  let adj = 0;
+  if (numChildren >= 3) {
+    adj = br === "4BR" ? 3 : br === "3BR" ? 5 : br === "2BR" ? -12 : -25;
+  } else if (numChildren >= 1) {
+    adj = br === "4BR" ? 2 : br === "3BR" ? 5 : br === "2BR" ? -5 : -18;
+  }
+  return Math.min(Math.max(propertyScore + adj, 20), 99);
+}
+
+function starsFor(score: number) {
+  const full = score >= 90 ? 5 : score >= 80 ? 4 : score >= 70 ? 4 : score >= 60 ? 3 : 2;
+  const half = score >= 75 && score < 80 ? 1 : score >= 65 && score < 70 ? 1 : 0;
+  return { full, half, empty: 5 - full - half };
+}
+
+// ── Upgrade path config ───────────────────────────────────────────────────────
+
+const UPGRADE_META: Record<string, {
+  icon: string;
+  bullets: string[];
+  bottomLabel: string;
+  bottomCls: string;
+}> = {
+  "Stay": {
+    icon: "🏠",
+    bullets: ["Lowest financial risk", "No transaction costs", "Opportunity cost of waiting"],
+    bottomLabel: "Safest Financially",
+    bottomCls: "text-amber-700 bg-amber-50 border-amber-200",
+  },
+  "Bigger HDB": {
+    icon: "🏢",
+    bullets: ["More space, lower risk", "Lower monthly repayments", "Long waiting time for BTO"],
+    bottomLabel: "Safe & Comfortable",
+    bottomCls: "text-emerald-700 bg-emerald-50 border-emerald-200",
+  },
+  "EC": {
+    icon: "🏗️",
+    bullets: ["Balanced option", "Subsidy + private living", "May have MOP restrictions"],
+    bottomLabel: "Check Eligibility",
+    bottomCls: "text-blue-700 bg-blue-50 border-blue-200",
+  },
+  "Private Condo": {
+    icon: "🏙️",
+    bullets: ["Better lifestyle & facilities", "Good upside potential", "Higher monthly commitment"],
+    bottomLabel: "Best Overall Fit",
+    bottomCls: "text-indigo-700 bg-indigo-50 border-indigo-200",
+  },
+};
+
+// ── ScoreCircle ───────────────────────────────────────────────────────────────
+
+function ScoreCircle({ score, recommended }: { score: number; recommended?: boolean }) {
+  const r = 36; const circ = 2 * Math.PI * r;
+  const dash = circ - (score / 100) * circ;
+  const col = recommended ? "#6366f1" : score >= 75 ? "#10b981" : score >= 60 ? "#f59e0b" : "#9ca3af";
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="88" height="88" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#e5e7eb" strokeWidth="6" />
+        <circle cx="40" cy="40" r={r} fill="none" stroke={col} strokeWidth="6"
+          strokeDasharray={circ} strokeDashoffset={dash}
+          strokeLinecap="round" transform="rotate(-90 40 40)" />
+        <text x="40" y="36" textAnchor="middle" fontSize="18" fontWeight="bold" fill={col}>{score}</text>
+        <text x="40" y="50" textAnchor="middle" fontSize="9" fill="#9ca3af">/100</text>
+      </svg>
+      <p className="text-[10px] text-slate-400 -mt-1">Suitability Score</p>
+    </div>
+  );
+}
+
+// ── SmallScoreCircle ──────────────────────────────────────────────────────────
+
+function SmallScore({ score }: { score: number }) {
+  const r = 22; const circ = 2 * Math.PI * r;
+  const dash = circ - (score / 100) * circ;
+  const col = score >= 80 ? "#6366f1" : score >= 70 ? "#10b981" : "#f59e0b";
+  return (
+    <svg width="56" height="56" viewBox="0 0 52 52">
+      <circle cx="26" cy="26" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5" />
+      <circle cx="26" cy="26" r={r} fill="none" stroke={col} strokeWidth="5"
+        strokeDasharray={circ} strokeDashoffset={dash}
+        strokeLinecap="round" transform="rotate(-90 26 26)" />
+      <text x="26" y="23" textAnchor="middle" fontSize="11" fontWeight="bold" fill={col}>{score}</text>
+      <text x="26" y="33" textAnchor="middle" fontSize="7" fill="#9ca3af">/100</text>
+    </svg>
+  );
+}
+
+// ── Stars ─────────────────────────────────────────────────────────────────────
+
+function Stars({ score }: { score: number }) {
+  const { full, empty } = starsFor(score);
+  return (
+    <div className="flex gap-0.5">
+      {Array.from({ length: full }).map((_, i) => (
+        <span key={`f${i}`} className="text-amber-400 text-sm">★</span>
+      ))}
+      {Array.from({ length: empty }).map((_, i) => (
+        <span key={`e${i}`} className="text-gray-200 text-sm">★</span>
+      ))}
+    </div>
+  );
+}
+
+// ── WhyPanel ──────────────────────────────────────────────────────────────────
+
+function WhyPanel({
+  recommendation, numChildren, affordable, gainPct, remainingLease,
+}: {
+  recommendation: string; numChildren: number; affordable: boolean;
+  gainPct: number; remainingLease: number;
+}) {
+  const reasons: string[] = [];
+  if (affordable) reasons.push("Monthly repayment is affordable");
+  if (gainPct > 15) reasons.push("Strong capital gain from your current flat");
+  reasons.push("Good long-term upside potential");
+  if (numChildren > 0) reasons.push(`Better space & facilities for ${numChildren} kid${numChildren !== 1 ? "s" : ""}`);
+  if (remainingLease >= 70) reasons.push("Your flat has strong remaining lease");
+
+  const explanations: Record<string, string> = {
+    "Private Condo": "You have strong budget headroom for private property and your family will enjoy better living environment, schools and amenities. Monthly mortgage is within a comfortable range.",
+    "Bigger HDB": "Upgrading within the HDB market offers more space at a lower financial commitment — a great step for a growing family.",
+    "EC": "Executive Condominiums give you the best of both worlds — private condo facilities with an HDB-like price for eligible buyers.",
+    "Stay": "Staying put minimises financial risk and lets your flat's value continue to appreciate with no transaction costs.",
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 h-full">
+      <h3 className="font-bold text-slate-800 text-sm mb-2">Why {recommendation}?</h3>
+      <p className="text-xs text-slate-500 leading-relaxed mb-4">
+        {explanations[recommendation] ?? "Based on your financial profile, this upgrade path offers the best balance of affordability and growth."}
+      </p>
+      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Key Considerations</p>
+      <div className="space-y-1.5">
+        {reasons.map((r) => (
+          <div key={r} className="flex items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-[10px] font-bold shrink-0">✓</span>
+            <span className="text-xs text-slate-600">{r}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[9px] text-slate-300 mt-4 pt-3 border-t border-slate-100 leading-relaxed">
+        Upgrade path is assessed using affordability, monthly repayment stress, proceeds after sale, family space & facilities, and risk buffer. This is separate from individual property scoring.
+      </p>
+    </div>
+  );
+}
+
+// ── UpgradePathCard ───────────────────────────────────────────────────────────
+
+function UpgradePathCard({
+  option, score, isRecommended, isSelected, onClick,
+}: {
+  option: UpgradeOption; score: number; isRecommended: boolean; isSelected: boolean; onClick: () => void;
+}) {
+  const meta = UPGRADE_META[option.type] ?? UPGRADE_META["Stay"];
+  return (
+    <div
+      onClick={onClick}
+      className={`relative bg-white rounded-xl border-2 p-4 cursor-pointer transition-all select-none ${
+        isRecommended
+          ? "border-indigo-500 shadow-md shadow-indigo-100"
+          : isSelected
+          ? "border-slate-400"
+          : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
+      }`}
+    >
+      {isRecommended && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+          Recommended Path
+        </div>
+      )}
+      <div className="text-center">
+        <div className="text-3xl mb-1">{meta.icon}</div>
+        <h3 className="font-bold text-slate-800 text-[13px] mb-2 leading-tight">{option.label}</h3>
+        <ScoreCircle score={score} recommended={isRecommended} />
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {meta.bullets.map((b, i) => (
+          <li key={i} className="flex items-start gap-2 text-[11px] text-slate-500 leading-tight">
+            <span className="mt-0.5 text-slate-300 shrink-0">•</span>
+            {b}
+          </li>
+        ))}
+      </ul>
+      <div className={`mt-3 text-center text-[11px] font-semibold py-1.5 rounded-lg border ${meta.bottomCls}`}>
+        {meta.bottomLabel}
+      </div>
+    </div>
+  );
+}
+
+// ── PropertyCard ──────────────────────────────────────────────────────────────
+
+const CARD_COLORS = [
+  "from-violet-600 to-indigo-700",
+  "from-blue-600 to-indigo-600",
+  "from-indigo-600 to-purple-700",
+  "from-blue-700 to-blue-900",
+  "from-purple-600 to-violet-800",
+  "from-teal-600 to-cyan-700",
+  "from-indigo-500 to-blue-700",
+  "from-violet-500 to-purple-700",
+  "from-blue-500 to-cyan-700",
+  "from-indigo-600 to-blue-800",
+];
+
+function PropertyCard({
+  rank, listing, numChildren, defaultBr, budget,
+}: {
+  rank: number; listing: ExtendedProjectSummary; numChildren: number; defaultBr: BrId; budget: number;
+}) {
+  const [selectedBr, setSelectedBr] = useState<BrId>(defaultBr);
+
+  const def = BR_DEFS.find((d) => d.id === selectedBr)!;
+  const estLow  = Math.round(listing.medianPsm * def.sqmLow);
+  const estHigh = Math.round(listing.medianPsm * def.sqmHigh);
+  const mortLow  = estimateMortgage(estLow);
+  const mortHigh = estimateMortgage(estHigh);
+  const sqftLow  = Math.round(def.sqmLow  * 10.764);
+  const sqftHigh = Math.round(def.sqmHigh * 10.764);
+  const suitability = familySuitability(selectedBr, numChildren);
+  const utScore = unitTypeScore(listing.propertyScore, selectedBr, numChildren);
+  const affordable = estLow <= budget;
+
+  const tenureShort = listing.tenure.includes("Freehold") ? "Freehold"
+    : listing.tenure.includes("999") ? "999-yr"
+    : listing.tenure.match(/(\d{2,3})-year/) ? listing.tenure.match(/(\d{2,3})-year/)![1] + "-yr"
+    : "99-yr";
+
+  const tenureCls = listing.tenure.includes("Freehold")
+    ? "bg-violet-100 text-violet-700"
+    : "bg-emerald-100 text-emerald-700";
+
+  const trend = listing.trend3Y;
+  const trendCls = trend >= 0 ? "text-emerald-600" : "text-red-500";
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex shadow-sm hover:shadow-md transition-shadow">
+
+      {/* Left: Image placeholder */}
+      <div className={`relative w-44 shrink-0 bg-gradient-to-br ${CARD_COLORS[(rank - 1) % CARD_COLORS.length]} flex flex-col items-center justify-center`}>
+        <div className="absolute top-2 left-2 w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
+          <span className="text-white font-black text-sm">{rank}</span>
+        </div>
+        <div className="text-white text-center px-3">
+          <div className="text-4xl mb-2">🏙️</div>
+          <p className="text-[10px] font-semibold text-white/80 leading-tight text-center">
+            {listing.marketSegment}
+          </p>
+        </div>
+        {affordable && (
+          <div className="absolute bottom-2 left-2 right-2 bg-emerald-500/90 text-white text-[9px] font-bold text-center rounded py-0.5">
+            ✓ Within Budget
+          </div>
+        )}
+      </div>
+
+      {/* Middle: Details */}
+      <div className="flex-1 p-4 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 mb-0.5">
+          <h3 className="font-bold text-slate-900 text-base leading-tight">{listing.project}</h3>
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tenureCls}`}>
+            {tenureShort}
+          </span>
+        </div>
+        <p className="text-xs text-slate-400 mb-2 flex items-center gap-1">
+          <span>📍</span> {listing.street}
+        </p>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-3">
+          <div>
+            <p className="text-[9px] text-slate-400">Est. Price Range ({selectedBr})</p>
+            <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] text-slate-400">Avg PSF ({selectedBr})</p>
+            <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
+            <p className={`text-sm font-bold ${trendCls}`}>
+              {trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[9px] text-slate-400">Transactions (3yr)</p>
+            <p className="text-sm font-bold text-slate-700">{listing.txCount} txns</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Score + unit type + quick stats */}
+      <div className="w-52 shrink-0 border-l border-slate-100 p-3 flex flex-col gap-2">
+
+        {/* Score */}
+        <div className="flex items-center gap-2">
+          <SmallScore score={listing.propertyScore} />
+          <div>
+            <p className="text-[9px] text-slate-400">Project Score</p>
+            <Stars score={listing.propertyScore} />
+          </div>
+        </div>
+
+        {/* Unit type selector */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-widest">Select Unit Type</p>
+            {numChildren > 0 && (
+              <span className="text-[8px] bg-emerald-100 text-emerald-700 font-semibold px-1.5 py-0.5 rounded-full">Recommended</span>
+            )}
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {(["3BR", "4BR", "2BR", "1BR"] as BrId[]).map((br) => {
+              const isFamily = br === "3BR" || br === "4BR";
+              const isSelected = selectedBr === br;
+              return (
+                <button key={br} onClick={() => setSelectedBr(br)}
+                  className={`text-[10px] px-2 py-0.5 rounded border font-semibold transition-colors ${
+                    isSelected
+                      ? isFamily && numChildren > 0
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-slate-700 text-white border-slate-700"
+                      : "border-slate-200 text-slate-500 hover:border-slate-400"
+                  }`}>
+                  {br}
+                </button>
+              );
+            })}
+          </div>
+          {numChildren > 0 && (
+            <p className="text-[9px] text-slate-400 mt-1">
+              ✓ Recommended: 3BR or 4BR
+            </p>
+          )}
+        </div>
+
+        {/* Quick stats */}
+        <div className="bg-slate-50 rounded-lg p-2 space-y-1 text-[10px] flex-1">
+          <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
+          {[
+            { label: "Est. Size", value: `${sqftLow} – ${sqftHigh} sqft` },
+            { label: "Recent Avg PSF", value: `$${fmt(listing.medianPsm)}` },
+            { label: "Est. Monthly Mortgage", value: `$${fmt(mortLow)} – $${fmt(mortHigh)}` },
+          ].map(({ label, value }) => (
+            <div key={label} className="flex justify-between">
+              <span className="text-slate-400">{label}</span>
+              <span className="font-semibold text-slate-700">{value}</span>
+            </div>
+          ))}
+          <div className="flex justify-between">
+            <span className="text-slate-400">Suitability for Family</span>
+            <span className={`font-bold ${suitability.color}`}>{suitability.label}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Unit Type Score ({selectedBr})</span>
+            <span className="font-bold text-slate-700">{utScore}/100</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MapPanel ──────────────────────────────────────────────────────────────────
+
+function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCode: string }) {
+  const hasCoords = lat > 0 && lng > 0;
+  const delta = 0.012;
+  const bbox = hasCoords
+    ? `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`
+    : "103.76,1.27,103.85,1.34";
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik${hasCoords ? `&marker=${lat},${lng}` : ""}`;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ minHeight: 420 }}>
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div>
+          <p className="font-semibold text-slate-800 text-sm">Property Map</p>
+          <p className="text-[10px] text-slate-400">(Within 1.5 km radius)</p>
+        </div>
+        <div className="text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
+          Postal: {postalCode || "—"}
+        </div>
+      </div>
+      <div className="flex-1 relative">
+        {hasCoords ? (
+          <iframe src={src} className="w-full h-full border-0" style={{ minHeight: 360 }} title="Property Map" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400 text-sm" style={{ minHeight: 360 }}>
+            Enter postal code for map
+          </div>
+        )}
+      </div>
+      {/* Legend */}
+      <div className="px-4 py-2 border-t border-slate-100 flex gap-4 flex-wrap">
+        {[
+          { icon: "🏠", label: "Your Home" },
+          { icon: "🏙️", label: "Recommended Property" },
+          { icon: "⭕", label: "1.5 km Radius" },
+        ].map(({ icon, label }) => (
+          <div key={label} className="flex items-center gap-1 text-[9px] text-slate-500">
+            <span>{icon}</span><span>{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main dashboard ────────────────────────────────────────────────────────────
+
+export default function ResultsDashboard({
+  assessment, optionScores, gainPct, remainingLease,
+  displayAddress, postalCode, numChildren, lat, lng,
+  flatType, town, purchaseYear, purchasePrice, remainingLoan, sellingFirst,
+  privateListings, ecListings, biggerHdbListings, nextFlatType,
+}: DashboardProps) {
+  // Filter state
+  const [propType, setPropType] = useState<"Condo" | "EC" | "HDB">("Condo");
+  const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
+  const [showAllProps, setShowAllProps] = useState(false);
+
+  // Upgrade path card state
+  const [selectedUpgrade, setSelectedUpgrade] = useState(assessment.recommendation);
+
+  const defaultBr = defaultBrFromChildren(numChildren);
+
+  // Filtered listings for top properties
+  const shownListings = propType === "Condo" ? privateListings
+    : propType === "EC" ? [] // EC is simple, shown separately
+    : [];
+  const displayedListings = showAllProps ? shownListings : shownListings.slice(0, 10);
+
+  const recIdx = assessment.options.findIndex((o) => o.type === assessment.recommendation);
+  const selIdx = assessment.options.findIndex((o) => o.type === selectedUpgrade);
+  const selOption = assessment.options[selIdx] ?? assessment.options[0];
+
+  const today = new Date().toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
+
+  return (
+    <div className="min-h-screen bg-slate-50" style={{ fontFamily: "system-ui, sans-serif" }}>
+
+      {/* ── Full-width header ── */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="flex items-center gap-4 px-4 py-3 max-w-[1600px] mx-auto">
+
+          {/* Logo */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <span className="text-white text-xs font-black">SG</span>
+            </div>
+            <div>
+              <p className="font-black text-slate-800 text-xs leading-none">SG Property Advisor</p>
+              <p className="text-[9px] text-slate-400 leading-none mt-0.5">Upgrade Smarter. Live Better.</p>
+            </div>
+          </div>
+
+          <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" />
+
+          {/* Address */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-slate-400 text-sm shrink-0">📍</span>
+            <div className="min-w-0">
+              <p className="text-[9px] text-slate-400 leading-none">Your Home</p>
+              <p className="text-sm font-semibold text-slate-800 leading-tight truncate">{displayAddress}</p>
+            </div>
+            <Link href="/assessment"
+              className="ml-1 text-[10px] text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 shrink-0">
+              ✏ Edit
+            </Link>
+          </div>
+
+          <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" />
+
+          {/* Key stats */}
+          <div className="flex items-center gap-5 flex-1 overflow-x-auto">
+            {numChildren > 0 && (
+              <div className="shrink-0">
+                <p className="text-[9px] text-slate-400">Family</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {numChildren} Kid{numChildren !== 1 ? "s" : ""}
+                </p>
+              </div>
+            )}
+            <div className="shrink-0">
+              <p className="text-[9px] text-slate-400">Monthly Household Income</p>
+              <p className="text-sm font-semibold text-slate-800">${fmt(assessment.combinedIncome)}</p>
+            </div>
+            <div className="shrink-0">
+              <p className="text-[9px] text-slate-400">Selling First</p>
+              <p className="text-sm font-semibold text-slate-800 flex items-center gap-1">
+                <span className="text-emerald-500">✓</span> {sellingFirst ? "Yes" : "No"}
+              </p>
+            </div>
+          </div>
+
+          <Link href="/assessment"
+            className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors">
+            Update My Info
+          </Link>
+        </div>
+      </header>
+
+      <div className="flex max-w-[1600px] mx-auto" style={{ minHeight: "calc(100vh - 60px)" }}>
+
+        {/* ── Left sidebar ── */}
+        <aside className="w-60 shrink-0 bg-white border-r border-slate-200 overflow-y-auto sticky top-[60px] self-start" style={{ maxHeight: "calc(100vh - 60px)" }}>
+
+          {/* Filters */}
+          <div className="p-4 border-b border-slate-100">
+            <p className="text-xs font-bold text-slate-700 mb-3">Search & Filters</p>
+
+            {/* Property Type */}
+            <div className="mb-3">
+              <p className="text-[10px] text-slate-500 mb-1.5">Property Type</p>
+              <div className="flex gap-1">
+                {(["Condo", "EC", "HDB"] as const).map((t) => (
+                  <button key={t} onClick={() => setPropType(t)}
+                    className={`flex-1 text-[11px] py-1.5 rounded-lg border font-medium transition-colors ${
+                      propType === t
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "border-slate-200 text-slate-500 hover:border-slate-400"
+                    }`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Min Bedrooms */}
+            <div className="mb-3">
+              <p className="text-[10px] text-slate-500 mb-1.5">Min Bedrooms</p>
+              <div className="flex gap-1">
+                {(["1BR", "2BR", "3BR", "4BR"] as BrId[]).map((br) => {
+                  const isFamily = br === "3BR" || br === "4BR";
+                  return (
+                    <button key={br} onClick={() => setBrFilter(br)}
+                      className={`flex-1 text-[10px] py-1.5 rounded-lg border font-medium transition-colors ${
+                        brFilter === br
+                          ? isFamily && numChildren > 0
+                            ? "bg-indigo-600 text-white border-indigo-600"
+                            : "bg-slate-700 text-white border-slate-700"
+                          : "border-slate-200 text-slate-500 hover:border-slate-400"
+                      }`}>
+                      {br}
+                    </button>
+                  );
+                })}
+              </div>
+              {numChildren > 0 && (
+                <p className="text-[9px] text-indigo-500 mt-1">★ 3BR/4BR recommended for your family</p>
+              )}
+            </div>
+
+            {/* Budget range display */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <p className="text-[10px] text-slate-500">Budget Range</p>
+                <p className="text-[10px] font-semibold text-indigo-600">
+                  {fmtM(assessment.hdbBudget)} – {fmtM(assessment.privateBudget)}
+                </p>
+              </div>
+              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full" style={{ width: "60%" }} />
+              </div>
+              <div className="flex justify-between text-[9px] text-slate-400 mt-0.5">
+                <span>$400K</span><span>$2.5M+</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Financial Snapshot */}
+          <div className="p-4 border-b border-slate-100">
+            <p className="text-xs font-bold text-slate-700 mb-3">My Financial Snapshot</p>
+            <div className="space-y-2.5">
+              {[
+                { label: "Monthly Income (Combined)", value: `$${fmt(assessment.combinedIncome)}` },
+                { label: "Remaining Loan (Current)", value: `$${fmt(remainingLoan)}` },
+                { label: "Net Proceeds (Est.)", value: fmtM(assessment.netProceeds) },
+                { label: "Max Bank Loan", value: fmtM(assessment.maxBankLoan) },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between items-start">
+                  <span className="text-[10px] text-slate-500 leading-tight pr-2">{label}</span>
+                  <span className="text-[11px] font-semibold text-slate-800 shrink-0">{value}</span>
+                </div>
+              ))}
+              <div className="pt-1.5 border-t border-slate-100">
+                <p className="text-[9px] text-amber-500">ⓘ Estimates only. Actual figures may vary.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick links */}
+          <div className="p-4">
+            <p className="text-xs font-bold text-slate-700 mb-2">Quick Links</p>
+            <div className="space-y-1.5">
+              {[
+                { icon: "📊", label: "How We Calculate" },
+                { icon: "🗄️", label: "Data Sources" },
+                { icon: "📋", label: "Methodology" },
+              ].map(({ icon, label }) => (
+                <div key={label} className="flex items-center gap-2 text-[11px] text-slate-500 hover:text-indigo-600 cursor-pointer transition-colors py-0.5">
+                  <span>{icon}</span><span>{label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[9px] text-slate-400 mt-3">Last updated: {today}</p>
+          </div>
+        </aside>
+
+        {/* ── Main content ── */}
+        <main className="flex-1 overflow-x-hidden p-4 space-y-4 min-w-0">
+
+          {/* ── Section 1: Upgrade Path Assessment ── */}
+          <section className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">1</div>
+              <div>
+                <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Upgrade Path Assessment</h2>
+                <p className="text-xs text-slate-400">Which upgrade path is most suitable for you?</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              {/* 4 option cards */}
+              <div className="lg:col-span-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {assessment.options.map((opt, i) => (
+                  <UpgradePathCard
+                    key={opt.type}
+                    option={opt}
+                    score={optionScores[i] ?? 60}
+                    isRecommended={opt.type === assessment.recommendation}
+                    isSelected={opt.type === selectedUpgrade}
+                    onClick={() => setSelectedUpgrade(opt.type)}
+                  />
+                ))}
+              </div>
+
+              {/* Why panel */}
+              <div className="lg:col-span-1">
+                <WhyPanel
+                  recommendation={selOption?.type ?? assessment.recommendation}
+                  numChildren={numChildren}
+                  affordable={selOption?.affordable ?? false}
+                  gainPct={gainPct}
+                  remainingLease={remainingLease}
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* ── Section 2: Top Properties + Map ── */}
+          <div className="flex gap-4">
+
+            {/* Properties list */}
+            <div className="flex-1 min-w-0 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">2</div>
+                <div>
+                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide flex items-center gap-2">
+                    Top {shownListings.length} Recommended Properties
+                    <span className="text-xs font-normal text-slate-400 normal-case">
+                      ({propType === "Condo" ? "Private Condo" : propType})
+                    </span>
+                  </h2>
+                  <p className="text-[10px] text-slate-400">
+                    <span className="text-emerald-600">✓</span> Scored by affordability, location, family fit & market data
+                  </p>
+                </div>
+              </div>
+
+              {propType === "Condo" && displayedListings.length > 0 ? (
+                <>
+                  {displayedListings.map((listing, i) => (
+                    <PropertyCard
+                      key={listing.project}
+                      rank={i + 1}
+                      listing={listing}
+                      numChildren={numChildren}
+                      defaultBr={defaultBr}
+                      budget={assessment.privateBudget}
+                    />
+                  ))}
+                  {!showAllProps && shownListings.length > 10 && (
+                    <button onClick={() => setShowAllProps(true)}
+                      className="w-full py-3 border border-slate-300 rounded-xl text-slate-600 text-sm font-semibold hover:bg-slate-50 transition-colors">
+                      View All {shownListings.length} Properties
+                    </button>
+                  )}
+                </>
+              ) : propType === "EC" ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <p className="font-semibold text-slate-700 mb-3">Executive Condominium Options</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {ecListings.map((ec) => (
+                      <div key={ec.name} className={`rounded-xl border p-3 ${ec.price <= assessment.privateBudget ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
+                        <p className="font-bold text-slate-800 text-sm leading-tight">{ec.name}</p>
+                        <p className="text-xl font-black text-indigo-600 mt-1">{fmtM(ec.price)}</p>
+                        <p className="text-xs text-slate-500">{ec.bedrooms} · {ec.location}</p>
+                        {ec.price <= assessment.privateBudget && (
+                          <span className="inline-block mt-2 text-[9px] bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-full">✓ Affordable</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : propType === "HDB" ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <p className="font-semibold text-slate-700 mb-3">
+                    {nextFlatType ? `${nextFlatType} HDB in ${town || "your area"}` : "No larger HDB type available"}
+                  </p>
+                  {biggerHdbListings.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {biggerHdbListings.slice(0, 8).map((t, i) => (
+                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                          <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
+                          <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
+                          <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No recent transactions found. Enter a postal code for live data.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400">
+                  No listings available for this filter.
+                </div>
+              )}
+
+              <p className="text-[9px] text-slate-400 px-1">
+                Note: Prices and PSF are estimates based on latest available data. Actual figures may vary.
+              </p>
+            </div>
+
+            {/* Map panel */}
+            <div className="w-80 shrink-0">
+              <MapPanel lat={lat} lng={lng} postalCode={postalCode} />
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex justify-between text-[9px] text-slate-400 pt-2 border-t border-slate-200 pb-6">
+            <span>Data Sources: URA Realis, data.gov.sg · BSD/ABSD at 2024 IRAS rates</span>
+            <span>Last updated: {today}</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

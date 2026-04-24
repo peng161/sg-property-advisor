@@ -30,12 +30,12 @@ function addCommas(v: string) {
 }
 
 const inputCls =
-  "w-full bg-neutral-50 border border-neutral-200 rounded-2xl px-4 py-3 text-neutral-900 " +
-  "placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-amber-400 " +
+  "w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-900 " +
+  "placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 " +
   "focus:border-transparent transition-all text-sm";
 const selectCls =
-  "w-full bg-neutral-50 border border-neutral-200 rounded-2xl px-4 py-3 text-neutral-900 " +
-  "focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent " +
+  "w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-slate-900 " +
+  "focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent " +
   "transition-all text-sm appearance-none";
 
 interface GeoState { address: string; town: string; loading: boolean }
@@ -157,12 +157,12 @@ export default function AssessmentPage() {
     (Number(rawNum(form.myIncome)) || 0) + (Number(rawNum(form.wifeIncome)) || 0);
 
   return (
-    <main className="min-h-screen bg-[#D9E4D7]">
+    <main className="min-h-screen bg-[#eef2ff]">
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white/75 backdrop-blur-md border-b border-white/50 px-4 sm:px-6 py-3">
         <div className="max-w-xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-neutral-900 rounded-full flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0">
               <span className="text-white text-[10px] font-black tracking-tighter">SG</span>
             </div>
             <Link href="/" className="font-bold text-neutral-900 text-sm">SG Property Advisor</Link>
@@ -171,10 +171,10 @@ export default function AssessmentPage() {
           <div className="flex items-center gap-2">
             {[{ n: 1, label: "Your Flat" }, { n: 2, label: "Profile" }].map(({ n, label }) => (
               <div key={n} className="flex items-center gap-1.5">
-                {n > 1 && <div className={`w-6 sm:w-10 h-px ${step >= n ? "bg-amber-400" : "bg-neutral-200"}`} />}
-                <div className={`flex items-center gap-1.5 ${step >= n ? "text-amber-500" : "text-neutral-400"}`}>
+                {n > 1 && <div className={`w-6 sm:w-10 h-px ${step >= n ? "bg-indigo-500" : "bg-neutral-200"}`} />}
+                <div className={`flex items-center gap-1.5 ${step >= n ? "text-indigo-500" : "text-neutral-400"}`}>
                   <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                    step >= n ? "bg-amber-400 text-white" : "bg-neutral-200 text-neutral-400"
+                    step >= n ? "bg-indigo-500 text-white" : "bg-neutral-200 text-neutral-400"
                   }`}>{n}</span>
                   <span className="hidden sm:inline text-xs font-medium">{label}</span>
                 </div>
@@ -221,12 +221,12 @@ export default function AssessmentPage() {
                 </div>
                 {errors.postalCode && <p className="text-red-500 text-xs mt-1">{errors.postalCode}</p>}
                 {geo.address && !errors.postalCode && (
-                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2 flex items-start gap-2">
-                    <span className="text-amber-500 text-sm mt-0.5">✓</span>
+                  <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded-2xl px-3 py-2 flex items-start gap-2">
+                    <span className="text-indigo-500 text-sm mt-0.5">✓</span>
                     <div>
-                      <p className="text-xs font-semibold text-amber-700">{geo.address}</p>
+                      <p className="text-xs font-semibold text-indigo-700">{geo.address}</p>
                       {geo.town && (
-                        <p className="text-xs text-amber-600 mt-0.5">Town: {geo.town}</p>
+                        <p className="text-xs text-indigo-600 mt-0.5">Town: {geo.town}</p>
                       )}
                     </div>
                   </div>
@@ -242,9 +242,9 @@ export default function AssessmentPage() {
                       onClick={() => set("flatType", ft.value)}
                       className={`text-left rounded-2xl border-2 px-4 py-3 transition-all min-h-[56px]
                         ${form.flatType === ft.value
-                          ? "border-amber-400 bg-amber-50"
+                          ? "border-indigo-500 bg-indigo-50"
                           : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
-                      <div className={`font-bold text-sm ${form.flatType === ft.value ? "text-amber-700" : "text-neutral-900"}`}>
+                      <div className={`font-bold text-sm ${form.flatType === ft.value ? "text-indigo-700" : "text-neutral-900"}`}>
                         {ft.label}
                       </div>
                       <div className="text-xs text-neutral-400 mt-0.5">{ft.sub}</div>
@@ -328,7 +328,7 @@ export default function AssessmentPage() {
               </div>
 
               <button type="button" onClick={handleNext}
-                className="w-full bg-neutral-900 hover:bg-neutral-800 text-white font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 mt-2 text-sm">
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 mt-2 text-sm shadow-lg shadow-indigo-400/20">
                 Next: Your Profile
                 <ArrowRight />
               </button>
@@ -357,7 +357,7 @@ export default function AssessmentPage() {
                     {geo.town && <span className="text-neutral-400 ml-2">{geo.town}</span>}
                   </div>
                   {form.purchasePrice && (
-                    <span className="text-amber-400 font-semibold text-sm">
+                    <span className="text-indigo-400 font-semibold text-sm">
                       Bought S${form.purchasePrice}
                       {form.purchaseYear && ` in ${form.purchaseYear}`}
                     </span>
@@ -379,9 +379,9 @@ export default function AssessmentPage() {
                       onClick={() => set("citizenship", c.value)}
                       className={`text-left rounded-2xl border-2 px-3 py-3 transition-all min-h-[64px]
                         ${form.citizenship === c.value
-                          ? "border-amber-400 bg-amber-50"
+                          ? "border-indigo-500 bg-indigo-50"
                           : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
-                      <div className={`font-bold text-xs leading-tight ${form.citizenship === c.value ? "text-amber-700" : "text-neutral-900"}`}>
+                      <div className={`font-bold text-xs leading-tight ${form.citizenship === c.value ? "text-indigo-700" : "text-neutral-900"}`}>
                         {c.label}
                       </div>
                       <div className="text-xs text-neutral-400 mt-1 leading-tight">{c.sub}</div>
@@ -405,9 +405,9 @@ export default function AssessmentPage() {
                       onClick={() => set("sellingFirst", opt.v)}
                       className={`text-left rounded-2xl border-2 px-4 py-3 transition-all min-h-[56px]
                         ${form.sellingFirst === opt.v
-                          ? "border-amber-400 bg-amber-50"
+                          ? "border-indigo-500 bg-indigo-50"
                           : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
-                      <div className={`font-bold text-sm ${form.sellingFirst === opt.v ? "text-amber-700" : "text-neutral-900"}`}>
+                      <div className={`font-bold text-sm ${form.sellingFirst === opt.v ? "text-indigo-700" : "text-neutral-900"}`}>
                         {opt.label}
                       </div>
                       <div className="text-xs text-neutral-400 mt-0.5">{opt.sub}</div>
@@ -428,7 +428,7 @@ export default function AssessmentPage() {
                       onClick={() => set("numChildren", n)}
                       className={`rounded-2xl border-2 py-3 font-bold text-sm transition-all
                         ${form.numChildren === n
-                          ? "border-amber-400 bg-amber-50 text-amber-700"
+                          ? "border-indigo-500 bg-indigo-50 text-indigo-700"
                           : "border-neutral-200 bg-white text-neutral-900 hover:border-neutral-300"
                         }`}>
                       {n}
@@ -436,7 +436,7 @@ export default function AssessmentPage() {
                   ))}
                 </div>
                 {Number(form.numChildren) >= 3 && (
-                  <p className="text-xs text-amber-600 mt-1.5">
+                  <p className="text-xs text-indigo-600 mt-1.5">
                     We&apos;ll default to 3BR/4BR options — ideal for your family size
                   </p>
                 )}
@@ -468,9 +468,9 @@ export default function AssessmentPage() {
               </div>
 
               {combinedIncome > 0 && (
-                <div className="rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm text-amber-700 font-medium">Combined household income</span>
-                  <span className="text-amber-700 font-bold text-sm">
+                <div className="rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm text-indigo-700 font-medium">Combined household income</span>
+                  <span className="text-indigo-700 font-bold text-sm">
                     S${combinedIncome.toLocaleString("en-SG")}
                     <span className="font-normal text-xs">/mo</span>
                   </span>
@@ -478,7 +478,7 @@ export default function AssessmentPage() {
               )}
 
               <button type="submit"
-                className="w-full bg-amber-400 hover:bg-amber-300 text-neutral-900 font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-amber-400/20 text-sm">
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-400/20 text-sm">
                 See My Upgrade Options
                 <ArrowRight />
               </button>
