@@ -534,6 +534,7 @@ export default function ResultsDashboard({
 }: DashboardProps) {
   // Filter state
   const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
+  const [tenureFilter, setTenureFilter] = useState<"All" | "99yr" | "999yr" | "Freehold">("All");
   const [showDebug, setShowDebug] = useState(false);
 
   // Upgrade path card state
@@ -544,8 +545,16 @@ export default function ResultsDashboard({
 
   const defaultBr = defaultBrFromChildren(numChildren);
 
-  // Private Condo listings only shown for that path
-  const displayedListings = selectedUpgrade === "Private Condo" ? privateListings : [];
+  // Private Condo listings — filtered by tenure
+  const displayedListings = selectedUpgrade === "Private Condo"
+    ? privateListings.filter((p) => {
+        if (tenureFilter === "All") return true;
+        if (tenureFilter === "Freehold") return p.tenure.toLowerCase().includes("freehold");
+        if (tenureFilter === "999yr")    return p.tenure.includes("999");
+        // 99yr: anything that isn't freehold or 999-year
+        return !p.tenure.toLowerCase().includes("freehold") && !p.tenure.includes("999");
+      })
+    : [];
 
   const recIdx = assessment.options.findIndex((o) => o.type === assessment.recommendation);
   const selIdx = assessment.options.findIndex((o) => o.type === selectedUpgrade);
@@ -650,6 +659,28 @@ export default function ResultsDashboard({
                 <p className="text-[9px] text-indigo-500 mt-1">★ 3BR/4BR recommended for your family</p>
               )}
             </div>
+
+            {/* Tenure filter — Private Condo only */}
+            {selectedUpgrade === "Private Condo" && (
+              <div className="mb-3">
+                <p className="text-[10px] text-slate-500 mb-1.5">Tenure</p>
+                <div className="grid grid-cols-2 gap-1">
+                  {(["All", "99yr", "999yr", "Freehold"] as const).map((t) => {
+                    const label = t === "99yr" ? "99-yr" : t === "999yr" ? "999-yr" : t;
+                    return (
+                      <button key={t} onClick={() => setTenureFilter(t)}
+                        className={`text-[10px] py-1.5 rounded-lg border font-medium transition-colors ${
+                          tenureFilter === t
+                            ? "bg-indigo-600 text-white border-indigo-600"
+                            : "border-slate-200 text-slate-500 hover:border-slate-400"
+                        }`}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Budget range display */}
             <div>
@@ -839,6 +870,11 @@ export default function ResultsDashboard({
                     <>
                       <h2 className="font-black text-slate-900 text-base uppercase tracking-wide flex items-center gap-2">
                         Top {displayedListings.length} Private Condo Recommendations
+                        {tenureFilter !== "All" && (
+                          <span className="text-xs font-normal text-indigo-500 normal-case bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                            {tenureFilter === "99yr" ? "99-yr" : tenureFilter === "999yr" ? "999-yr" : tenureFilter}
+                          </span>
+                        )}
                       </h2>
                       <p className="text-[10px] text-slate-400">
                         <span className="text-emerald-600">✓</span> Scored by affordability, distance (within 1.5 km) & market data
@@ -941,8 +977,22 @@ export default function ResultsDashboard({
 
               {selectedUpgrade === "Private Condo" && displayedListings.length === 0 && (
                 <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400">
-                  <p className="text-sm font-semibold text-slate-500 mb-1">No listings available</p>
-                  <p className="text-xs">Ensure MongoDB is configured and seeded, or enter a postal code for location-based recommendations.</p>
+                  {tenureFilter !== "All" ? (
+                    <>
+                      <p className="text-sm font-semibold text-slate-500 mb-1">
+                        No {tenureFilter === "99yr" ? "99-year" : tenureFilter === "999yr" ? "999-year" : "Freehold"} properties found
+                      </p>
+                      <button onClick={() => setTenureFilter("All")}
+                        className="mt-2 text-xs text-indigo-500 hover:text-indigo-700 font-semibold underline">
+                        Clear tenure filter
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-semibold text-slate-500 mb-1">No listings available</p>
+                      <p className="text-xs">Ensure MongoDB is configured and seeded, or enter a postal code for location-based recommendations.</p>
+                    </>
+                  )}
                 </div>
               )}
 
