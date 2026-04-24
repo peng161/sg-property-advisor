@@ -31,28 +31,46 @@ export interface EcSummary {
   bedrooms: string;
 }
 
+export interface DebugInfo {
+  postalCode:              string;
+  lat:                     number;
+  lng:                     number;
+  leaseCommencementYear:   number;
+  leaseKnown:              boolean;
+  remainingLease:          number;
+  hdbTxCount:              number;
+  privateProjectCount:     number;
+  dbProjectsWithin1_5km:  number;
+  dataSource:              string;
+  hdbDataSource:           string;
+  mongoConfigured:         boolean;
+}
+
 export interface DashboardProps {
-  assessment:           AssessmentResult;
-  optionScores:         number[];
-  gainPct:              number;
-  remainingLease:       number;
-  displayAddress:       string;
-  postalCode:           string;
-  numChildren:          number;
-  lat:                  number;
-  lng:                  number;
-  flatType:             string;
-  town:                 string;
-  sqm:                  number;
-  purchaseYear:         number;
-  purchasePrice:        number;
-  remainingLoan:        number;
-  sellingFirst:         boolean;
-  privateListings:      ExtendedProjectSummary[];
-  ecListings:           EcSummary[];
-  biggerHdbListings:    HdbResaleRecord[];
-  nextFlatType:         string | null;
-  sameTypeHdbListings:  HdbResaleRecord[];
+  assessment:              AssessmentResult;
+  optionScores:            number[];
+  gainPct:                 number;
+  remainingLease:          number;
+  leaseKnown:              boolean;
+  leaseCommencementYear:   number;
+  displayAddress:          string;
+  postalCode:              string;
+  numChildren:             number;
+  lat:                     number;
+  lng:                     number;
+  flatType:                string;
+  town:                    string;
+  sqm:                     number;
+  purchaseYear:            number;
+  purchasePrice:           number;
+  remainingLoan:           number;
+  sellingFirst:            boolean;
+  privateListings:         ExtendedProjectSummary[];
+  ecListings:              EcSummary[];
+  biggerHdbListings:       HdbResaleRecord[];
+  nextFlatType:            string | null;
+  sameTypeHdbListings:     HdbResaleRecord[];
+  debugInfo:               DebugInfo;
 }
 
 // ── Bedroom helpers ───────────────────────────────────────────────────────────
@@ -527,15 +545,17 @@ function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCo
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 export default function ResultsDashboard({
-  assessment, optionScores, gainPct, remainingLease,
+  assessment, optionScores, gainPct, remainingLease, leaseKnown, leaseCommencementYear,
   displayAddress, postalCode, numChildren, lat, lng,
   flatType, town, purchaseYear, purchasePrice, remainingLoan, sellingFirst,
   privateListings, ecListings, biggerHdbListings, nextFlatType, sameTypeHdbListings,
+  debugInfo,
 }: DashboardProps) {
   // Filter state
   const [propType, setPropType] = useState<"Condo" | "EC" | "HDB">("Condo");
   const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
   const [showAllProps, setShowAllProps] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Upgrade path card state
   const [selectedUpgrade, setSelectedUpgrade] = useState(assessment.recommendation);
@@ -695,6 +715,10 @@ export default function ResultsDashboard({
                 { label: "Remaining Loan (Current)", value: `$${fmt(remainingLoan)}` },
                 { label: "Net Proceeds (Est.)", value: fmtM(assessment.netProceeds) },
                 { label: "Max Bank Loan", value: fmtM(assessment.maxBankLoan) },
+                {
+                  label: "Remaining Lease",
+                  value: leaseKnown ? `${remainingLease} yrs` : "Unknown",
+                },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between items-start">
                   <span className="text-[10px] text-slate-500 leading-tight pr-2">{label}</span>
@@ -722,11 +746,56 @@ export default function ResultsDashboard({
               ))}
             </div>
             <p className="text-[9px] text-slate-400 mt-3">Last updated: {today}</p>
+
+            {/* Debug toggle */}
+            <button
+              onClick={() => setShowDebug((v) => !v)}
+              className="mt-2 text-[9px] text-slate-300 hover:text-slate-500 transition-colors w-full text-left py-0.5"
+            >
+              {showDebug ? "▾" : "▸"} Debug Panel
+            </button>
+
+            {showDebug && (
+              <div className="mt-1 bg-slate-50 rounded-lg p-2.5 text-[9px] text-slate-500 space-y-1 border border-slate-200">
+                <p className="font-bold text-slate-600 text-[10px] mb-1.5">Debug Info</p>
+                {[
+                  ["Postal Code", debugInfo.postalCode || "—"],
+                  ["Lat/Lng", debugInfo.lat ? `${debugInfo.lat.toFixed(5)}, ${debugInfo.lng.toFixed(5)}` : "Not geocoded"],
+                  ["Lease Commence Year", debugInfo.leaseKnown ? `${debugInfo.leaseCommencementYear}` : "Unknown"],
+                  ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "Unknown — not penalised"],
+                  ["HDB Txns Fetched", `${debugInfo.hdbTxCount}`],
+                  ["Private Projects", `${debugInfo.privateProjectCount}`],
+                  ["Within 1.5 km (DB)", debugInfo.mongoConfigured ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A (no DB)"],
+                  ["Private Source", debugInfo.dataSource],
+                  ["HDB Source", debugInfo.hdbDataSource],
+                  ["MongoDB", debugInfo.mongoConfigured ? "Configured" : "Not configured"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-1 leading-tight">
+                    <span className="text-slate-400 shrink-0">{k}</span>
+                    <span className="text-slate-600 font-medium text-right break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </aside>
 
         {/* ── Main content ── */}
         <main className="flex-1 overflow-x-hidden p-4 space-y-4 min-w-0">
+
+          {/* Lease unknown warning */}
+          {!leaseKnown && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
+              <span className="text-amber-500 text-base shrink-0">⚠</span>
+              <div>
+                <p className="text-xs font-semibold text-amber-800">Lease commencement year not found</p>
+                <p className="text-[11px] text-amber-600 mt-0.5">
+                  Enter your lease commencement year in the assessment form, or ensure you have a postal code.
+                  Lease scores are excluded from path assessment until this is known.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ── Section 1: Upgrade Path Assessment ── */}
           <section className="bg-white rounded-xl border border-slate-200 p-5">

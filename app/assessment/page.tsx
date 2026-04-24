@@ -53,7 +53,7 @@ export default function AssessmentPage() {
     purchaseYear:  "",
     remainingLoan: "",
     cpfUsed:       "",
-    leaseYear:     "",   // lease commence year
+    leaseCommencementYear: "",   // lease commence year (auto-detected or user-entered)
     citizenship:   "",
     sellingFirst:  "yes",
     myIncome:      "",
@@ -139,7 +139,7 @@ export default function AssessmentPage() {
       flatType:      form.flatType,
       floor:         form.floor         || "10",
       sqm:           form.sqm           || "0",
-      leaseYear:     form.leaseYear     || "0",
+      leaseCommencementYear: form.leaseCommencementYear || "0",
       purchasePrice: rawNum(form.purchasePrice),
       purchaseYear:  form.purchaseYear,
       remainingLoan: rawNum(form.remainingLoan) || "0",
@@ -274,6 +274,23 @@ export default function AssessmentPage() {
                     className={inputCls}
                   />
                 </div>
+              </div>
+
+              {/* Lease commencement year */}
+              <div>
+                <label className="block text-sm font-semibold text-neutral-700 mb-1">
+                  Lease Commencement Year <OptLabel />
+                </label>
+                <input
+                  type="text" inputMode="numeric" name="leaseCommencementYear"
+                  value={form.leaseCommencementYear}
+                  onChange={(e) => set("leaseCommencementYear", e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="e.g. 1995"
+                  className={inputCls}
+                />
+                <p className="text-xs text-neutral-400 mt-1">
+                  Found on your HDB title deed or MyHDBPage. Auto-detected from postal code when possible.
+                </p>
               </div>
 
               {/* Purchase price + year */}
