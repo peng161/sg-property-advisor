@@ -471,10 +471,13 @@ function PropertyCard({
 
 function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCode: string }) {
   const hasCoords = lat > 0 && lng > 0;
-  const apiKey = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
 
-  const src = apiKey && hasCoords
-    ? `https://api.maptiler.com/maps/streets-v2/?key=${apiKey}#15/${lat}/${lng}`
+  // OpenStreetMap embed — no API key required
+  const delta = 0.008; // ~900m bounding box radius
+  const src = hasCoords
+    ? `https://www.openstreetmap.org/export/embed.html` +
+      `?bbox=${lng - delta},${lat - delta},${lng + delta},${lat + delta}` +
+      `&layer=mapnik&marker=${lat},${lng}`
     : "";
 
   return (
@@ -495,26 +498,14 @@ function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCo
             src={src}
             className="w-full h-full border-0 absolute inset-0"
             style={{ minHeight: 360 }}
-            title="MapTiler — Property Location"
+            title="OpenStreetMap — Property Location"
             allowFullScreen
           />
-        ) : !apiKey ? (
+        ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 gap-3 px-6 text-center" style={{ minHeight: 360 }}>
             <span className="text-3xl">🗺️</span>
-            <p className="text-sm font-semibold text-slate-600">Map not configured</p>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Add your key to <code className="bg-slate-100 px-1 rounded text-[11px]">.env.local</code>:
-            </p>
-            <code className="text-[10px] bg-slate-100 text-slate-600 rounded px-2 py-1 break-all">
-              NEXT_PUBLIC_MAPTILER_KEY=your_key
-            </code>
-            <p className="text-[10px] text-slate-400">
-              Get a free key at <strong>maptiler.com</strong>.
-            </p>
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400 text-sm" style={{ minHeight: 360 }}>
-            Enter a postal code to load the map
+            <p className="text-sm font-semibold text-slate-600">No location data</p>
+            <p className="text-xs text-slate-400">Enter a postal code on the assessment form to load the map.</p>
           </div>
         )}
       </div>
@@ -522,7 +513,7 @@ function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCo
       <div className="px-4 py-2 border-t border-slate-100 flex gap-4 flex-wrap">
         {[
           { icon: "🏠", label: "Your Home" },
-          { icon: "🏙️", label: "Nearby Properties" },
+          { icon: "🗺️", label: "© OpenStreetMap contributors" },
         ].map(({ icon, label }) => (
           <div key={label} className="flex items-center gap-1 text-[9px] text-slate-500">
             <span>{icon}</span><span>{label}</span>
