@@ -29,16 +29,51 @@ function getLeaseBand(years: number) {
   return "<60";
 }
 
+// Singapore postal district → [lat, lng] centroid
+const DISTRICT_CENTROIDS: Record<string, [number, number]> = {
+  "01": [1.2810, 103.8508], "02": [1.2760, 103.8423], "03": [1.2894, 103.8083],
+  "04": [1.2700, 103.8210], "05": [1.3116, 103.7633], "06": [1.2930, 103.8530],
+  "07": [1.3010, 103.8610], "08": [1.3070, 103.8520], "09": [1.3010, 103.8350],
+  "10": [1.3190, 103.8130], "11": [1.3300, 103.8330], "12": [1.3300, 103.8490],
+  "13": [1.3370, 103.8700], "14": [1.3180, 103.8920], "15": [1.3060, 103.9050],
+  "16": [1.3270, 103.9400], "17": [1.3580, 103.9730], "18": [1.3500, 103.9400],
+  "19": [1.3700, 103.8930], "20": [1.3610, 103.8450], "21": [1.3410, 103.7700],
+  "22": [1.3330, 103.7200], "23": [1.3780, 103.7490], "24": [1.4080, 103.7190],
+  "25": [1.4340, 103.7760], "26": [1.4000, 103.8190], "27": [1.4320, 103.8320],
+  "28": [1.4040, 103.8700],
+};
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function distanceBonus(km: number | null): number {
+  if (km === null) return 0;
+  if (km < 2)  return 18;
+  if (km < 5)  return 12;
+  if (km < 10) return 6;
+  if (km < 15) return 2;
+  return 0;
+}
+
 function computePropertyScore(
   p: { marketSegment: string; minPrice: number; tenure: string; txCount: number },
-  budget: number
+  budget: number,
+  distKm: number | null = null
 ): number {
-  let score = 58;
-  score += p.marketSegment === "OCR" ? 12 : p.marketSegment === "RCR" ? 9 : 5;
-  if (p.minPrice <= budget) score += 12;
-  else if (p.minPrice <= budget * 1.2) score += 5;
-  score += Math.min(Math.floor(p.txCount / 3), 7);
-  if (p.tenure.toLowerCase().includes("freehold") || p.tenure.includes("999")) score += 5;
+  let score = 50;
+  score += p.marketSegment === "OCR" ? 10 : p.marketSegment === "RCR" ? 7 : 4;
+  if (p.minPrice <= budget) score += 10;
+  else if (p.minPrice <= budget * 1.2) score += 4;
+  score += Math.min(Math.floor(p.txCount / 3), 6);
+  if (p.tenure.toLowerCase().includes("freehold") || p.tenure.includes("999")) score += 4;
+  score += distanceBonus(distKm);
   return Math.min(Math.round(score), 99);
 }
 
@@ -206,15 +241,22 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     return first > 0 ? ((last - first) / first * 100) : 0;
   }
 
+  const hasUserCoords = lat > 0 && lng > 0;
+
   const privateListings: ExtendedProjectSummary[] = Array.from(byProject.entries())
     .map(([project, b]) => {
       const med = medianOf(b.psms);
+      const district = (b.txs[0].district ?? "").padStart(2, "0");
+      const centroid = DISTRICT_CENTROIDS[district];
+      const distKm = hasUserCoords && centroid
+        ? Math.round(haversineKm(lat, lng, centroid[0], centroid[1]) * 10) / 10
+        : null;
       const score = computePropertyScore({
         marketSegment: b.txs[0].marketSegment,
         minPrice:      b.min,
         tenure:        b.txs[0].tenure,
         txCount:       b.txs.length,
-      }, result.privateBudget);
+      }, result.privateBudget, distKm);
       return {
         project,
         street:        b.txs[0].street,
@@ -229,9 +271,10 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         maxSqm:        Math.max(...b.sqms),
         propertyScore: score,
         trend3Y:       projectTrend3Y(b.txs),
+        distanceKm:    distKm,
       };
     })
-    .sort((a, b) => b.propertyScore - a.propertyScore || b.txCount - a.txCount)
+    .sort((a, b) => b.propertyScore - a.propertyScore || (a.distanceKm ?? 99) - (b.distanceKm ?? 99))
     .slice(0, 15);
 
   const displayAddress = geoAddress

@@ -21,6 +21,7 @@ export interface ExtendedProjectSummary {
   maxSqm:        number;
   propertyScore: number;
   trend3Y:       number;
+  distanceKm:    number | null;
 }
 
 export interface EcSummary {
@@ -342,6 +343,11 @@ function PropertyCard({
           <p className="text-[10px] font-semibold text-white/80 leading-tight text-center">
             {listing.marketSegment}
           </p>
+          {listing.distanceKm !== null && (
+            <p className="text-[11px] font-bold text-white mt-1">
+              📍 {listing.distanceKm} km
+            </p>
+          )}
         </div>
         {affordable && (
           <div className="absolute bottom-2 left-2 right-2 bg-emerald-500/90 text-white text-[9px] font-bold text-center rounded py-0.5">
@@ -381,6 +387,12 @@ function PropertyCard({
             <p className="text-[9px] text-slate-400">Transactions (3yr)</p>
             <p className="text-sm font-bold text-slate-700">{listing.txCount} txns</p>
           </div>
+          {listing.distanceKm !== null && (
+            <div>
+              <p className="text-[9px] text-slate-400">Distance from Home</p>
+              <p className="text-sm font-bold text-indigo-600">📍 {listing.distanceKm} km</p>
+            </div>
+          )}
         </div>
       </div>
 
