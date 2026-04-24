@@ -217,7 +217,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   let dbProjectCount = 0;
 
   if (hasUserCoords && isMongoConfigured()) {
-    const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget);
+    const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 7);
     if (fromDb && projects.length > 0) {
       privateListings = projects;
       dbUsed = true;
@@ -303,7 +303,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
         };
       })
       .sort((a, b) => b.propertyScore - a.propertyScore || (a.distanceKm ?? 99) - (b.distanceKm ?? 99))
-      .slice(0, 15);
+      .slice(0, 7);
   }
 
   // ── HDB: same flat type nearby (for "Stay" path) ──────────────────────────
