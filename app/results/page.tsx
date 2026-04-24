@@ -2,7 +2,12 @@ import { assess, fmt } from "@/lib/calculator";
 import { fetchHdbPrices, fetchHdbTransactions, fetchHdbBlockLeaseYear } from "@/lib/fetchHdb";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
 import { fetchPrivatePrices } from "@/lib/fetchPrivate";
+import { fetchPrivateTransactions } from "@/lib/fetchPrivateTransactions";
+import type { PrivateTransaction } from "@/lib/fetchPrivateTransactions";
+import { EC_OPTIONS } from "@/lib/mockData";
 import { geocodePostal } from "@/lib/geocode";
+import UpgradeOptionsPanel from "@/components/UpgradeOptionsPanel";
+import type { ProjectSummary } from "@/components/UpgradeOptionsPanel";
 import Link from "next/link";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -335,6 +340,68 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     computeScore(o.type, o.affordable, gainPct, remainingLease)
   );
 
+  // ── Upgrade options listings data ─────────────────────────────────────────
+
+  // Determine user's market segment from HDB town
+  const TOWN_SEGMENT: Record<string, "OCR" | "RCR" | "CCR"> = {
+    "Ang Mo Kio": "OCR", "Bedok": "OCR", "Bishan": "RCR", "Bukit Batok": "OCR",
+    "Bukit Merah": "RCR", "Bukit Panjang": "OCR", "Bukit Timah": "RCR",
+    "Central Area": "CCR", "Choa Chu Kang": "OCR", "Clementi": "RCR",
+    "Geylang": "RCR", "Hougang": "OCR", "Jurong East": "OCR", "Jurong West": "OCR",
+    "Kallang/Whampoa": "RCR", "Marine Parade": "RCR", "Pasir Ris": "OCR",
+    "Punggol": "OCR", "Queenstown": "RCR", "Sembawang": "OCR", "Sengkang": "OCR",
+    "Serangoon": "RCR", "Tampines": "OCR", "Toa Payoh": "RCR",
+    "Woodlands": "OCR", "Yishun": "OCR",
+  };
+  const userSegment: "OCR" | "RCR" | "CCR" = TOWN_SEGMENT[town] ?? "OCR";
+
+  // Bigger HDB listings — next flat type transactions in same town
+  const FLAT_ORDER = ["3-Room", "4-Room", "5-Room", "Executive"] as const;
+  const nextFlatType: string | null =
+    FLAT_ORDER[FLAT_ORDER.indexOf(input.flatType as typeof FLAT_ORDER[number]) + 1] ?? null;
+  const nextApiFlatType = nextFlatType ? FLAT_TYPE_API[nextFlatType] : null;
+  const biggerHdbListings: HdbResaleRecord[] = nextApiFlatType
+    ? hdbTx.filter((t) => t.flatType === nextApiFlatType).slice(0, 12)
+    : [];
+
+  // EC listings (static curated options)
+  const ecListings = EC_OPTIONS.map((ec) => ({
+    name:     ec.name,
+    price:    ec.price,
+    location: ec.location,
+    bedrooms: ec.bedrooms,
+  }));
+
+  // Private listings — aggregate by project, filter by user's segment
+  const privateTx = await fetchPrivateTransactions();
+  const byProject = new Map<string, { tx: PrivateTransaction[]; min: number; max: number; psms: number[] }>();
+  for (const t of privateTx) {
+    if (t.marketSegment !== userSegment) continue;
+    const existing = byProject.get(t.project);
+    if (!existing) {
+      byProject.set(t.project, { tx: [t], min: t.price, max: t.price, psms: [t.pricePerSqm] });
+    } else {
+      existing.tx.push(t);
+      existing.min = Math.min(existing.min, t.price);
+      existing.max = Math.max(existing.max, t.price);
+      existing.psms.push(t.pricePerSqm);
+    }
+  }
+  const privateListings: ProjectSummary[] = Array.from(byProject.entries())
+    .map(([project, { tx, min, max, psms }]) => ({
+      project,
+      street:        tx[0].street,
+      tenure:        tx[0].tenure,
+      marketSegment: tx[0].marketSegment,
+      minPrice:      min,
+      maxPrice:      max,
+      medianPsm:     medianOf(psms),
+      txCount:       tx.length,
+      latestDate:    tx.sort((a, b) => b.contractDate.localeCompare(a.contractDate))[0].contractDate,
+    }))
+    .sort((a, b) => b.txCount - a.txCount || b.latestDate.localeCompare(a.latestDate))
+    .slice(0, 15);
+
   // Recommended option ROI
   const recIdx = result.options.findIndex((o) => o.type === result.recommendation);
   const recOption = result.options[recIdx] ?? result.options[0];
@@ -589,136 +656,23 @@ export default async function ResultsPage({ searchParams }: PageProps) {
           {/* ── Row 2: Upgrade Options · Decision Engine ── */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
 
-            {/* 2. Upgrade Options Comparison */}
-            <section className="lg:col-span-8 bg-[#161b22] rounded-xl border border-slate-800 overflow-hidden">
-              <div className="px-4 pt-4 pb-2 border-b border-slate-800">
-                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
-                  2.&nbsp; Upgrade Options Comparison
-                </p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[480px] text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-800">
-                      <th className="text-left px-4 py-3 text-slate-600 font-semibold w-28 text-[10px]">
-                        Metric
-                      </th>
-                      {result.options.map((opt) => (
-                        <th
-                          key={opt.type}
-                          className={`px-3 py-3 text-center ${
-                            opt.type === result.recommendation ? "bg-emerald-900/20" : ""
-                          }`}
-                        >
-                          <p className={`font-bold text-[10px] ${
-                            opt.type === result.recommendation
-                              ? "text-emerald-400" : "text-slate-300"
-                          }`}>
-                            {opt.label.toUpperCase()}
-                          </p>
-                          <p className="text-[8px] text-slate-600 mt-0.5">
-                            {opt.type === "Stay"         ? "Hold current flat"
-                            : opt.type === "Bigger HDB"  ? "Next flat tier"
-                            : opt.type === "EC"          ? "Exec. Condo"
-                            :                             "Freehold / 99yr"}
-                          </p>
-                          {opt.type === result.recommendation && (
-                            <span className="inline-block mt-1 text-[8px] bg-emerald-400 text-slate-900 font-black px-1.5 py-0.5 rounded-full">
-                              ★ BEST
-                            </span>
-                          )}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-
-                    {/* Price Range */}
-                    <tr>
-                      <td className="px-4 py-2.5 text-slate-500 text-[10px]">Price Range</td>
-                      {result.options.map((opt) => (
-                        <td key={opt.type} className={`px-3 py-2.5 text-center ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          <span className="font-semibold text-slate-200">
-                            {opt.type === "Stay"
-                              ? fmtShort(result.currentMarketValue)
-                              : opt.costs.downPayment > 0
-                              ? `~${fmtShort(Math.round(opt.costs.downPayment / (opt.type === "Bigger HDB" ? 0.20 : 0.25)))}`
-                              : "—"}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-
-                    {/* Monthly Repayment */}
-                    <tr>
-                      <td className="px-4 py-2.5 text-slate-500 text-[10px]">Monthly Repayment</td>
-                      {result.options.map((opt) => (
-                        <td key={opt.type} className={`px-3 py-2.5 text-center ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          <span className="text-slate-300 text-[10px]">{opt.monthlyRepayment}</span>
-                        </td>
-                      ))}
-                    </tr>
-
-                    {/* Affordability */}
-                    <tr>
-                      <td className="px-4 py-2.5 text-slate-500 text-[10px]">Affordability</td>
-                      {result.options.map((opt) => (
-                        <td key={opt.type} className={`px-3 py-2.5 text-center ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          {opt.type === "Stay" ? (
-                            <span className="text-emerald-400 font-semibold text-[10px]">✓ Owned</span>
-                          ) : opt.affordable ? (
-                            <span className="text-emerald-400 font-semibold text-[10px]">✓ Affordable</span>
-                          ) : (
-                            <span className="text-amber-400 font-semibold text-[10px]">⚠ Stretch</span>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-
-                    {/* Upfront Costs */}
-                    <tr>
-                      <td className="px-4 py-2.5 text-slate-500 text-[10px]">Upfront Costs</td>
-                      {result.options.map((opt) => (
-                        <td key={opt.type} className={`px-3 py-2.5 text-center ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          <span className="text-slate-400 text-[10px]">
-                            {opt.type === "Stay" || opt.costs.total === 0 ? "—" : fmtShort(opt.costs.total)}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-
-                    {/* Key Advantage */}
-                    <tr>
-                      <td className="px-4 py-2.5 text-slate-500 text-[10px]">Key Advantage</td>
-                      {result.options.map((opt) => (
-                        <td key={opt.type} className={`px-3 py-2.5 text-center ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          <span className="text-[9px] text-slate-500">
-                            {opt.type === "Stay"         ? "Zero cost · equity accruing"
-                            : opt.type === "Bigger HDB"  ? "HDB loan eligible"
-                            : opt.type === "EC"          ? "Private features, HDB pricing"
-                            :                             "Full private · rental upside"}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-
-                    {/* Investment Score */}
-                    <tr>
-                      <td className="px-4 py-3 text-slate-500 text-[10px]">Investment Score</td>
-                      {result.options.map((opt, i) => (
-                        <td key={opt.type} className={`px-3 py-3 ${opt.type === result.recommendation ? "bg-emerald-900/10" : ""}`}>
-                          <div className="flex justify-center">
-                            <ScoreGauge score={optionScores[i]} />
-                          </div>
-                        </td>
-                      ))}
-                    </tr>
-
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            {/* 2. Upgrade Options Comparison (interactive client component) */}
+            <div className="lg:col-span-8">
+              <UpgradeOptionsPanel
+                options={result.options}
+                optionScores={optionScores}
+                recommendation={result.recommendation}
+                currentMarketValue={result.currentMarketValue}
+                netProceeds={result.netProceeds}
+                privateBudget={result.privateBudget}
+                biggerHdbListings={biggerHdbListings}
+                nextFlatType={nextFlatType}
+                ecListings={ecListings}
+                privateListings={privateListings}
+                userTown={town}
+                userSegment={userSegment}
+              />
+            </div>
 
             {/* 3. Decision Engine */}
             <div className="lg:col-span-4 space-y-3">
