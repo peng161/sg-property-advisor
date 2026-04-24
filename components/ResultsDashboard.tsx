@@ -458,33 +458,71 @@ function PropertyCard({
 
 function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCode: string }) {
   const hasCoords = lat > 0 && lng > 0;
-  const delta = 0.012;
-  const bbox = hasCoords
-    ? `${lng - delta},${lat - delta},${lng + delta},${lat + delta}`
-    : "103.76,1.27,103.85,1.34";
-  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik${hasCoords ? `&marker=${lat},${lng}` : ""}`;
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
+
+  // Google Maps Embed API — "place" mode when we have a postal code,
+  // "view" mode centred on coordinates otherwise.
+  let src = "";
+  if (apiKey) {
+    if (hasCoords) {
+      src =
+        `https://www.google.com/maps/embed/v1/view` +
+        `?key=${apiKey}` +
+        `&center=${lat},${lng}` +
+        `&zoom=15` +
+        `&maptype=roadmap`;
+    } else if (postalCode) {
+      src =
+        `https://www.google.com/maps/embed/v1/place` +
+        `?key=${apiKey}` +
+        `&q=Singapore+${postalCode}` +
+        `&zoom=15`;
+    }
+  }
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ minHeight: 420 }}>
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div>
           <p className="font-semibold text-slate-800 text-sm">Property Map</p>
-          <p className="text-[10px] text-slate-400">(Within 1.5 km radius)</p>
+          <p className="text-[10px] text-slate-400">Within 1.5 km radius</p>
         </div>
         <div className="text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
           Postal: {postalCode || "—"}
         </div>
       </div>
-      <div className="flex-1 relative">
-        {hasCoords ? (
-          <iframe src={src} className="w-full h-full border-0" style={{ minHeight: 360 }} title="Property Map" />
+
+      <div className="flex-1 relative" style={{ minHeight: 360 }}>
+        {src ? (
+          <iframe
+            src={src}
+            className="w-full h-full border-0 absolute inset-0"
+            style={{ minHeight: 360 }}
+            title="Google Maps — Property Location"
+            allowFullScreen
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        ) : !apiKey ? (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 gap-3 px-6 text-center" style={{ minHeight: 360 }}>
+            <span className="text-3xl">🗺️</span>
+            <p className="text-sm font-semibold text-slate-600">Google Maps not configured</p>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Add your key to <code className="bg-slate-100 px-1 rounded text-[11px]">.env.local</code>:
+            </p>
+            <code className="text-[10px] bg-slate-100 text-slate-600 rounded px-2 py-1 break-all">
+              NEXT_PUBLIC_GOOGLE_MAPS_KEY=your_key
+            </code>
+            <p className="text-[10px] text-slate-400">
+              Enable <strong>Maps Embed API</strong> in Google Cloud Console.
+            </p>
+          </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400 text-sm" style={{ minHeight: 360 }}>
-            Enter postal code for map
+            Enter a postal code to load the map
           </div>
         )}
       </div>
-      {/* Legend */}
+
       <div className="px-4 py-2 border-t border-slate-100 flex gap-4 flex-wrap">
         {[
           { icon: "🏠", label: "Your Home" },
