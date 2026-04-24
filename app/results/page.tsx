@@ -503,8 +503,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                   },
                   {
                     label: "Lease Left",
-                    value: remainingLease > 0 ? `${myLeaseBand} yrs` : "—",
-                    sub: null,
+                    value: remainingLease > 0 ? `${remainingLease} yrs` : "—",
+                    sub: myLeaseBand ? `${myLeaseBand} band` : null,
                     color: remainingLease >= 70
                       ? "text-emerald-400" : remainingLease >= 60
                       ? "text-amber-400" : "text-red-400",
@@ -722,8 +722,10 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                     {gainPositive && (
                       <p className="text-[9px] text-slate-400">✓ Strong capital gain from current flat</p>
                     )}
-                    {remainingLease >= 70 && (
-                      <p className="text-[9px] text-slate-400">✓ Good remaining lease ({myLeaseBand} yrs)</p>
+                    {remainingLease > 0 && (
+                      <p className="text-[9px] text-slate-400">
+                        ✓ {remainingLease >= 70 ? "Good" : remainingLease >= 60 ? "Adequate" : "Limited"} remaining lease ({remainingLease} yrs · {myLeaseBand} band)
+                      </p>
                     )}
                     <p className="text-[9px] text-slate-400">✓ Maximises long-term wealth growth</p>
                     {result.recommendation !== "Stay" && (
