@@ -14,6 +14,25 @@ function fmtShort(n: number) {
     : `$${(n / 1_000).toFixed(0)}K`;
 }
 
+const FLAT_TYPE_API: Record<string, string> = {
+  "3-Room": "3 ROOM", "4-Room": "4 ROOM", "5-Room": "5 ROOM", "Executive": "EXECUTIVE",
+};
+
+function getLeaseBand(years: number): string {
+  if (years >= 90) return "90+";
+  if (years >= 80) return "80–90";
+  if (years >= 70) return "70–80";
+  if (years >= 60) return "60–70";
+  return "<60";
+}
+
+function medianOf(arr: number[]): number {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
 interface PageProps {
   searchParams: Promise<Record<string, string>>;
 }
@@ -78,7 +97,23 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const mockNearby = getMockHdb(town);
   const hdbSource  = hdbTx.length > 0 ? "live" : "mock";
 
-  const result = assess(input, { hdb, private: privatePrices });
+  // Compute market value from nearby transactions matching flat type + lease band
+  const myLeaseBand = remainingLease > 0 ? getLeaseBand(remainingLease) : null;
+  const apiFlatType = FLAT_TYPE_API[input.flatType];
+  let nearbyMarketValue = 0;
+  if (hdbTx.length > 0 && apiFlatType && myLeaseBand) {
+    const comparable = hdbTx.filter(
+      (t) => t.flatType === apiFlatType && getLeaseBand(t.remainingLease) === myLeaseBand
+    );
+    if (comparable.length > 0) nearbyMarketValue = medianOf(comparable.map((t) => t.resalePrice));
+  }
+
+  const hdbWithNearby: Record<string, number> | null =
+    nearbyMarketValue > 0
+      ? { ...(hdb ?? {}), [input.flatType]: nearbyMarketValue }
+      : hdb;
+
+  const result = assess(input, { hdb: hdbWithNearby, private: privatePrices });
   const gainPositive = result.capitalGain >= 0;
 
   return (
@@ -122,22 +157,6 @@ export default async function ResultsPage({ searchParams }: PageProps) {
             {input.town && ` · ${input.town}`}
             {geoAddress && ` · ${geoAddress.split(" SINGAPORE")[0]}`}
           </p>
-          <div className="flex gap-2 pt-1 flex-wrap">
-            {[
-              { label: "HDB", live: result.dataSource.hdb === "live" },
-            ].map(({ label, live }) => (
-              <span
-                key={label}
-                className={`text-[11px] px-2.5 py-0.5 rounded-full font-medium border ${
-                  live
-                    ? "bg-emerald-100 border-emerald-200 text-emerald-700"
-                    : "bg-white/60 border-neutral-200 text-neutral-400"
-                }`}
-              >
-                {live ? "●" : "○"} {label}: {live ? "Live" : "Sample"}
-              </span>
-            ))}
-          </div>
         </div>
 
         {/* ── 3 dark KPI cards ── */}
@@ -190,7 +209,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                 { label: "Market Value",    value: `S$${fmt(result.currentMarketValue)}`, color: "font-bold text-neutral-900" },
                 ...(remainingLease > 0 ? [{
                   label: "Lease Left",
-                  value: `${remainingLease} yrs`,
+                  value: `${myLeaseBand} yrs`,
                   color: remainingLease >= 70 ? "text-emerald-600"
                        : remainingLease >= 60 ? "text-amber-600"
                        : "text-red-500",
