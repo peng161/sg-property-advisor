@@ -1,5 +1,5 @@
 import { assess, fmt } from "@/lib/calculator";
-import { fetchHdbPrices, fetchHdbTransactions } from "@/lib/fetchHdb";
+import { fetchHdbPrices, fetchHdbTransactions, fetchHdbBlockLeaseYear } from "@/lib/fetchHdb";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
 import { fetchPrivatePrices } from "@/lib/fetchPrivate";
 import { geocodePostal } from "@/lib/geocode";
@@ -219,11 +219,15 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const postalCode = params.postalCode ?? "";
   let town = params.town ?? "";
   let geoAddress = "";
+  let geoBlock   = "";
+  let geoStreet  = "";
   if (postalCode) {
     const geo = await geocodePostal(postalCode);
     if (geo) {
       if (!town && geo.town) town = geo.town;
       geoAddress = geo.fullAddress;
+      geoBlock   = geo.block;  // e.g. "448" or "448A"
+      geoStreet  = geo.street; // e.g. "CLEMENTI AVE 3"
     }
   }
 
@@ -250,14 +254,19 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     town ? fetchHdbTransactions(town) : Promise.resolve([]),
   ]);
 
-  // Auto-detect lease year from geocoded block
-  const matchingTx = geoAddress
-    ? hdbTx.find((t) => {
-        const geoBlock = geoAddress.match(/^(?:BLK\s+)?(\S+)/i)?.[1] ?? "";
-        return t.block.trim().toUpperCase() === geoBlock.trim().toUpperCase();
-      })
+  // Auto-detect lease year:
+  // 1. Match block number directly from OneMap result in recent resale transactions
+  // 2. If not found (block has no recent sales), query the API for any historical record
+  // 3. Fall back to manually-entered leaseYear
+  const matchingTx = geoBlock
+    ? hdbTx.find((t) => t.block.trim().toUpperCase() === geoBlock.trim().toUpperCase())
     : undefined;
-  const autoLeaseYear = matchingTx?.leaseCommenceYear ?? input.leaseYear;
+  const leaseYearFromApi =
+    !matchingTx && geoBlock && town
+      ? await fetchHdbBlockLeaseYear(geoBlock, town, geoStreet || undefined)
+      : null;
+  const autoLeaseYear =
+    matchingTx?.leaseCommenceYear ?? leaseYearFromApi ?? input.leaseYear;
   const remainingLease = autoLeaseYear > 0
     ? Math.max(0, 99 - (new Date().getFullYear() - autoLeaseYear))
     : 0;
@@ -298,6 +307,28 @@ export default async function ResultsPage({ searchParams }: PageProps) {
       ? ((trendData[trendData.length - 1].psf - trendData[trendData.length - 2].psf) /
           trendData[trendData.length - 2].psf * 100) / 3
       : 0;
+
+  // Lease band comparison (non-overlapping 10-yr buckets, same flat type)
+  const BAND_DEFS = [
+    { label: "90+ yrs",   min: 90, max: 99, color: "#10b981" /* emerald */ },
+    { label: "80–89 yrs", min: 80, max: 89, color: "#14b8a6" /* teal    */ },
+    { label: "70–79 yrs", min: 70, max: 79, color: "#f59e0b" /* amber   */ },
+    { label: "60–69 yrs", min: 60, max: 69, color: "#f97316" /* orange  */ },
+    { label: "< 60 yrs",  min: 0,  max: 59, color: "#ef4444" /* red     */ },
+  ] as const;
+  const leaseBandStats = BAND_DEFS.map(({ label, min, max, color }) => {
+    const txs = hdbTx.filter((t) => {
+      const matchType = !apiFlatType || t.flatType === apiFlatType;
+      return matchType && t.remainingLease >= min && t.remainingLease <= max;
+    });
+    return {
+      label, color, count: txs.length,
+      medianPrice: medianOf(txs.map((t) => t.resalePrice)),
+      medianPsm:   medianOf(txs.map((t) => t.pricePerSqm)),
+      isMyBand:    remainingLease >= min && remainingLease <= max,
+    };
+  }).filter((b) => b.count > 0);
+  const bandMaxPrice = Math.max(...leaseBandStats.map((b) => b.medianPrice), 1);
 
   // Option scores
   const optionScores = result.options.map((o) =>
@@ -904,6 +935,140 @@ export default async function ResultsPage({ searchParams }: PageProps) {
               </div>
             </section>
           </div>
+
+          {/* ── Lease Band Comparison ── */}
+          {leaseBandStats.length > 0 && (
+            <section className="bg-[#161b22] rounded-xl border border-slate-800 p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+                <div>
+                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                    6.&nbsp; Lease Years Comparison
+                  </p>
+                  <p className="text-[10px] text-slate-600 mt-0.5">
+                    Median resale price by remaining lease band · {input.flatType || "All types"} · {town || "—"} · last 3 years
+                  </p>
+                </div>
+                {myLeaseBand && (
+                  <span className="text-[9px] font-semibold text-emerald-400 bg-emerald-900/20 border border-emerald-700/30 rounded-full px-2.5 py-1">
+                    Your flat: {remainingLease} yrs ({myLeaseBand} band)
+                  </span>
+                )}
+              </div>
+
+              {/* Band cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+                {leaseBandStats.map(({ label, color, count, medianPrice, medianPsm, isMyBand }) => {
+                  const barPct = Math.round((medianPrice / bandMaxPrice) * 100);
+                  return (
+                    <div
+                      key={label}
+                      className={`rounded-xl p-3 border-2 transition-all ${
+                        isMyBand
+                          ? "border-white/30 bg-slate-800/80"
+                          : "border-slate-800 bg-slate-800/30"
+                      }`}
+                    >
+                      {/* Band label */}
+                      <div className="flex items-center justify-between mb-2">
+                        <span
+                          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ backgroundColor: `${color}22`, color }}
+                        >
+                          {label}
+                        </span>
+                        {isMyBand && (
+                          <span className="text-[8px] font-bold text-white bg-white/20 rounded-full px-1.5 py-0.5">
+                            ← Yours
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Median price */}
+                      <p className="text-base font-black text-white leading-tight">
+                        {fmtShort(medianPrice)}
+                      </p>
+                      <p className="text-[9px] text-slate-500 mt-0.5">
+                        ${fmt(medianPsm)}/sqm
+                      </p>
+                      <p className="text-[9px] text-slate-600 mt-0.5">
+                        {count} transaction{count !== 1 ? "s" : ""}
+                      </p>
+
+                      {/* Relative price bar */}
+                      <div className="mt-2.5 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${barPct}%`, backgroundColor: color }}
+                        />
+                      </div>
+                      <p className="text-[8px] text-slate-600 mt-0.5 text-right">{barPct}% of peak</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Comparison table */}
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full min-w-[480px] text-xs">
+                  <thead>
+                    <tr className="bg-slate-800/50 border-b border-slate-800">
+                      <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-slate-500">Lease Band</th>
+                      <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-slate-500">Median Price</th>
+                      <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-slate-500">Median $/sqm</th>
+                      <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-slate-500">Transactions</th>
+                      <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-slate-500">vs Peak</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {leaseBandStats.map(({ label, color, count, medianPrice, medianPsm, isMyBand }) => {
+                      const diff = leaseBandStats[0]
+                        ? ((medianPrice - leaseBandStats[0].medianPrice) / leaseBandStats[0].medianPrice * 100)
+                        : 0;
+                      return (
+                        <tr
+                          key={label}
+                          className={isMyBand ? "bg-slate-700/30" : "hover:bg-slate-800/30"}
+                        >
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: color }}
+                              />
+                              <span className="font-semibold text-slate-200">{label}</span>
+                              {isMyBand && (
+                                <span className="text-[8px] font-bold text-white bg-white/20 rounded-full px-1.5 py-0.5 ml-1">
+                                  Your flat
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-bold text-slate-200">
+                            ${fmt(medianPrice)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-slate-400">
+                            ${fmt(medianPsm)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-slate-500">
+                            {count}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className={diff >= 0 ? "text-emerald-400" : "text-red-400"}>
+                              {diff >= 0 ? "+" : ""}{diff.toFixed(1)}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-[9px] text-slate-700 mt-2">
+                Higher lease = higher price premium. Your flat&apos;s band directly affects resale value and market comparables used above.
+              </p>
+            </section>
+          )}
 
           {/* ── Disclaimer ── */}
           <div className="flex flex-wrap justify-between gap-2 pt-2 pb-4 border-t border-slate-800/60">

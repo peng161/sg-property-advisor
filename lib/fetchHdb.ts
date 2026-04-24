@@ -2,6 +2,8 @@
 // Tries the CKAN API first, falls back to the v2 API, then to mock data.
 
 const RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+// HDB Property Information — has blk_no, street, year_completed for every block
+const PROPERTY_INFO_RESOURCE = "482bfa14-2977-4035-9c61-c85f871daf4e";
 
 const FLAT_TYPE_API: Record<string, string> = {
   "3-Room":    "3 ROOM",
@@ -126,6 +128,63 @@ export async function fetchHdbPrices(
     if (val > 0) prices[ft] = val;
   }
   return Object.keys(prices).length > 0 ? prices : null;
+}
+
+// Looks up the lease commencement year for a specific block given its postal code.
+// Stage 1: query the HDB Resale dataset by block+town — has lease_commence_date
+//          directly but only covers blocks with at least one historical sale.
+// Stage 2: query the HDB Property Information dataset by blk_no+street —
+//          covers every HDB block; uses year_completed as a proxy for
+//          lease_commence_date (typically identical or within 1 year for 99-yr leases).
+export async function fetchHdbBlockLeaseYear(
+  block: string,
+  town: string,
+  street?: string     // road name from OneMap, e.g. "CLEMENTI AVE 3"
+): Promise<number | null> {
+  // Stage 1 — resale dataset (lease_commence_date exact)
+  try {
+    const filters = encodeURIComponent(
+      JSON.stringify({ town: town.toUpperCase(), block: block.toUpperCase() })
+    );
+    const url =
+      `https://data.gov.sg/api/action/datastore_search` +
+      `?resource_id=${RESOURCE_ID}&limit=1&filters=${filters}`;
+    const res = await fetch(url, { next: { revalidate: 86400 } });
+    if (res.ok) {
+      const json = await res.json();
+      const rows: RawRow[] = json?.result?.records ?? [];
+      if (rows.length > 0) {
+        const year = Number(rows[0].lease_commence_date);
+        if (year > 0) return year;
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Stage 2 — HDB Property Information dataset (year_completed as proxy)
+  if (street) {
+    try {
+      const filters = encodeURIComponent(
+        JSON.stringify({
+          blk_no: block.toUpperCase(),
+          street: street.toUpperCase(),
+        })
+      );
+      const url =
+        `https://data.gov.sg/api/action/datastore_search` +
+        `?resource_id=${PROPERTY_INFO_RESOURCE}&limit=1&filters=${filters}`;
+      const res = await fetch(url, { next: { revalidate: 86400 } });
+      if (res.ok) {
+        const json = await res.json();
+        const rows: RawRow[] = json?.result?.records ?? [];
+        if (rows.length > 0) {
+          const year = Number(rows[0].year_completed);
+          if (year > 0) return year;
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  return null;
 }
 
 // Returns recent individual HDB resale transactions for a given town.
