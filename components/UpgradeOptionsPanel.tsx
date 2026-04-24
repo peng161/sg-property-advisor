@@ -25,6 +25,8 @@ export interface ProjectSummary {
   medianPsm:     number;
   txCount:       number;
   latestDate:    string;
+  minSqm?:       number;
+  maxSqm?:       number;
 }
 
 export interface EcOption {
@@ -32,6 +34,45 @@ export interface EcOption {
   price:    number;
   location: string;
   bedrooms: string;
+}
+
+// ── Bedroom type filter helpers ───────────────────────────────────────────────
+
+const BR_DEFS = [
+  { id: "1BR", label: "1 Bed",  min: 0,   max: 54  },
+  { id: "2BR", label: "2 Bed",  min: 55,  max: 79  },
+  { id: "3BR", label: "3 Bed",  min: 80,  max: 114 },
+  { id: "4BR", label: "4 Bed+", min: 115, max: 999 },
+] as const;
+type BrId = "1BR" | "2BR" | "3BR" | "4BR";
+
+function defaultBrFromChildren(n: number): BrId {
+  return n >= 1 ? "3BR" : "2BR";
+}
+
+function isFamilyBr(br: BrId) { return br === "3BR" || br === "4BR"; }
+
+function projectHasBr(minSqm: number, maxSqm: number, br: BrId): boolean {
+  const def = BR_DEFS.find((d) => d.id === br);
+  if (!def) return true;
+  return minSqm <= def.max && maxSqm >= def.min;
+}
+
+function ecHasBr(bedrooms: string, br: BrId): boolean {
+  const numRe = /(\d)/g;
+  const nums = [...bedrooms.matchAll(numRe)].map((m) => Number(m[1]));
+  if (!nums.length) return true;
+  const low = Math.min(...nums); const high = Math.max(...nums);
+  const brNum = br === "1BR" ? 1 : br === "2BR" ? 2 : br === "3BR" ? 3 : 4;
+  return brNum >= low && brNum <= high;
+}
+
+function familyFitLabel(br: BrId, numChildren: number): { text: string; color: string } | null {
+  if (numChildren === 0) return null;
+  if (br === "4BR") return { text: "✓ Spacious for family", color: "text-emerald-400" };
+  if (br === "3BR") return { text: "✓ Recommended for your family", color: "text-emerald-400" };
+  if (br === "2BR") return { text: "⚠ Possible but tight", color: "text-amber-400" };
+  return { text: "⚡ Investment only", color: "text-slate-500" };
 }
 
 interface Props {
@@ -47,6 +88,7 @@ interface Props {
   privateListings:    ProjectSummary[];
   userTown:           string;
   userSegment:        string;
+  numChildren:        number;
 }
 
 // ── ScoreGauge ────────────────────────────────────────────────────────────────
@@ -160,14 +202,76 @@ function BiggerHdbPanel({
   );
 }
 
-function EcPanel({ listings, budget }: { listings: EcOption[]; budget: number }) {
+function EcPanel({
+  listings, budget, numChildren, defaultBr,
+}: {
+  listings: EcOption[];
+  budget: number;
+  numChildren: number;
+  defaultBr: BrId;
+}) {
+  const [selectedBr, setSelectedBr] = useState<BrId>(defaultBr);
+  const [showSmaller, setShowSmaller] = useState(false);
+
+  const familyBrs: BrId[] = ["3BR", "4BR"];
+  const smallBrs: BrId[] = ["1BR", "2BR"];
+  const visibleBrs = showSmaller ? [...familyBrs, ...smallBrs] : familyBrs;
+
+  const shown = listings.filter((ec) => ecHasBr(ec.bedrooms, selectedBr));
+
   return (
     <div>
       <p className="text-[10px] text-slate-500 mb-3">
         Executive Condominium projects — income ceiling S$16,000 · HDB loan eligible first 10 years
       </p>
+
+      {/* Bedroom filter */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-[9px] text-slate-600 font-semibold uppercase tracking-widest">Bedrooms:</span>
+        <div className="flex gap-1 flex-wrap">
+          {visibleBrs.map((br) => {
+            const isFamily = isFamilyBr(br);
+            const isSelected = selectedBr === br;
+            return (
+              <button key={br} onClick={() => setSelectedBr(br)}
+                className={`text-[9px] px-2 py-1 rounded-full border transition-colors flex items-center gap-1 ${
+                  isSelected
+                    ? isFamily
+                      ? "bg-emerald-400 text-slate-900 border-emerald-400 font-bold"
+                      : "bg-slate-200 text-slate-900 border-slate-200 font-bold"
+                    : "border-slate-700 text-slate-500 hover:border-slate-500"
+                }`}>
+                {BR_DEFS.find((d) => d.id === br)?.label}
+                {isFamily && numChildren > 0 && (
+                  <span className={isSelected ? "text-slate-700" : "text-emerald-400"}>★</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {!showSmaller && (
+          <button onClick={() => setShowSmaller(true)}
+            className="text-[9px] text-slate-600 hover:text-slate-400 underline ml-1">
+            + smaller units
+          </button>
+        )}
+      </div>
+
+      {numChildren > 0 && isFamilyBr(selectedBr) && (
+        <div className="mb-3 flex items-center gap-1.5 text-[9px] text-emerald-400">
+          <span>★</span>
+          <span className="font-semibold">Recommended for your family</span>
+        </div>
+      )}
+      {numChildren > 0 && !isFamilyBr(selectedBr) && (
+        <div className="mb-3 flex items-center gap-1.5 text-[9px] text-amber-400">
+          <span>⚠</span>
+          <span>Smaller units — better for investment or comparison</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {listings.map((ec) => {
+        {(shown.length ? shown : listings).map((ec) => {
           const affordable = ec.price <= budget;
           return (
             <div key={ec.name}
@@ -193,6 +297,11 @@ function EcPanel({ listings, budget }: { listings: EcOption[]; budget: number })
             </div>
           );
         })}
+        {shown.length === 0 && (
+          <p className="col-span-4 text-slate-600 text-xs text-center py-4">
+            No EC projects match this bedroom type.
+          </p>
+        )}
       </div>
       <p className="text-[9px] text-slate-700 mt-2">
         EC pricing indicative. Must not own / have disposed of private property in last 30 months.
@@ -202,18 +311,36 @@ function EcPanel({ listings, budget }: { listings: EcOption[]; budget: number })
 }
 
 function PrivateCondoPanel({
-  listings, userTown, userSegment, budget,
+  listings, userTown, userSegment, budget, numChildren, defaultBr,
 }: {
   listings:    ProjectSummary[];
   userTown:    string;
   userSegment: string;
   budget:      number;
+  numChildren: number;
+  defaultBr:   BrId;
 }) {
   const [segFilter, setSegFilter] = useState<string>(userSegment);
+  const [selectedBr, setSelectedBr] = useState<BrId>(defaultBr);
+  const [showSmaller, setShowSmaller] = useState(false);
 
-  const shown = listings
-    .filter((p) => !segFilter || p.marketSegment === segFilter)
-    .slice(0, 9);
+  const familyBrs: BrId[] = ["3BR", "4BR"];
+  const smallBrs: BrId[] = ["1BR", "2BR"];
+  const visibleBrs = showSmaller ? [...familyBrs, ...smallBrs] : familyBrs;
+
+  const segFiltered = listings.filter((p) => !segFilter || p.marketSegment === segFilter);
+  const brFiltered = segFiltered.filter((p) =>
+    p.minSqm !== undefined && p.maxSqm !== undefined
+      ? projectHasBr(p.minSqm, p.maxSqm, selectedBr)
+      : true
+  );
+  const shown = brFiltered.slice(0, 9);
+
+  // Affordability fallback: check if any 3BR project is within budget
+  const familyAffordable = segFiltered.some((p) => p.minPrice <= budget && isFamilyBr(selectedBr));
+  const showFallbackHint = numChildren > 0 && isFamilyBr(selectedBr) && !familyAffordable && segFiltered.length > 0;
+
+  const fit = numChildren > 0 ? familyFitLabel(selectedBr, numChildren) : null;
 
   return (
     <div>
@@ -236,14 +363,65 @@ function PrivateCondoPanel({
         </div>
       </div>
 
+      {/* Bedroom filter */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-[9px] text-slate-600 font-semibold uppercase tracking-widest">Bedrooms:</span>
+        <div className="flex gap-1 flex-wrap">
+          {visibleBrs.map((br) => {
+            const isFamily = isFamilyBr(br);
+            const isSelected = selectedBr === br;
+            return (
+              <button key={br} onClick={() => setSelectedBr(br)}
+                className={`text-[9px] px-2 py-1 rounded-full border transition-colors flex items-center gap-1 ${
+                  isSelected
+                    ? isFamily
+                      ? "bg-emerald-400 text-slate-900 border-emerald-400 font-bold"
+                      : "bg-slate-200 text-slate-900 border-slate-200 font-bold"
+                    : "border-slate-700 text-slate-500 hover:border-slate-500"
+                }`}>
+                {BR_DEFS.find((d) => d.id === br)?.label}
+                {isFamily && numChildren > 0 && (
+                  <span className={isSelected ? "text-slate-700" : "text-emerald-400"}>★</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {!showSmaller && (
+          <button onClick={() => setShowSmaller(true)}
+            className="text-[9px] text-slate-600 hover:text-slate-400 underline ml-1">
+            + smaller units
+          </button>
+        )}
+      </div>
+
+      {/* Family fit label */}
+      {fit && (
+        <div className={`mb-2 text-[9px] font-semibold ${fit.color}`}>
+          {fit.text}
+        </div>
+      )}
+
+      {/* Affordability fallback */}
+      {showFallbackHint && (
+        <div className="mb-3 flex items-start gap-2 bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-2">
+          <span className="text-amber-400 text-sm leading-none shrink-0">💡</span>
+          <p className="text-[9px] text-amber-300 leading-relaxed">
+            Based on your finances, <strong>2BR may be more realistic</strong> for private property.
+            3BR options shown below for comparison.
+          </p>
+        </div>
+      )}
+
       {shown.length === 0 ? (
         <p className="text-slate-600 text-xs text-center py-6">
-          No {segFilter} transactions in current data. Try another segment.
+          No {segFilter} transactions match this bedroom size. Try another segment or bedroom type.
         </p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {shown.map((p) => {
             const affordable = p.minPrice <= budget;
+            const brFit = numChildren > 0 ? familyFitLabel(selectedBr, numChildren) : null;
             return (
               <div key={p.project}
                 className={`rounded-xl p-3 border ${
@@ -278,12 +456,15 @@ function PrivateCondoPanel({
                     {p.txCount} txn{p.txCount !== 1 ? "s" : ""}
                   </span>
                 </div>
+                {brFit && (
+                  <p className={`text-[8px] mt-1.5 font-medium ${brFit.color}`}>{brFit.text}</p>
+                )}
                 {affordable ? (
-                  <span className="inline-block mt-2 text-[8px] bg-emerald-400 text-slate-900 font-bold px-1.5 py-0.5 rounded-full">
+                  <span className="inline-block mt-1.5 text-[8px] bg-emerald-400 text-slate-900 font-bold px-1.5 py-0.5 rounded-full">
                     ✓ Within budget
                   </span>
                 ) : (
-                  <span className="inline-block mt-2 text-[8px] bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-block mt-1.5 text-[8px] bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded-full">
                     Above budget
                   </span>
                 )}
@@ -306,9 +487,10 @@ export default function UpgradeOptionsPanel({
   currentMarketValue, netProceeds, privateBudget,
   biggerHdbListings, nextFlatType,
   ecListings, privateListings,
-  userTown, userSegment,
+  userTown, userSegment, numChildren,
 }: Props) {
   const [selected, setSelected] = useState<string>(recommendation);
+  const defaultBr = defaultBrFromChildren(numChildren);
 
   const selectedIdx = options.findIndex((o) => o.type === selected);
   const selectedScore = optionScores[selectedIdx] ?? 0;
@@ -485,10 +667,22 @@ export default function UpgradeOptionsPanel({
           <BiggerHdbPanel listings={biggerHdbListings} nextFlatType={nextFlatType} userTown={userTown} />
         )}
         {selected === "EC" && (
-          <EcPanel listings={ecListings} budget={privateBudget} />
+          <EcPanel
+            listings={ecListings}
+            budget={privateBudget}
+            numChildren={numChildren}
+            defaultBr={defaultBr}
+          />
         )}
         {selected === "Private Condo" && (
-          <PrivateCondoPanel listings={privateListings} userTown={userTown} userSegment={userSegment} budget={privateBudget} />
+          <PrivateCondoPanel
+            listings={privateListings}
+            userTown={userTown}
+            userSegment={userSegment}
+            budget={privateBudget}
+            numChildren={numChildren}
+            defaultBr={defaultBr}
+          />
         )}
       </div>
 

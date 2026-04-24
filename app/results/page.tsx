@@ -215,6 +215,8 @@ interface PageProps {
 export default async function ResultsPage({ searchParams }: PageProps) {
   const params = await searchParams;
 
+  const numChildren = Number(params.numChildren ?? 0);
+
   const rawCitizenship = params.citizenship ?? "SC";
   const citizenship: "SC" | "PR" | "Foreigner" =
     rawCitizenship === "PR" ? "PR"
@@ -374,21 +376,22 @@ export default async function ResultsPage({ searchParams }: PageProps) {
 
   // Private listings — aggregate by project, filter by user's segment
   const privateTx = await fetchPrivateTransactions();
-  const byProject = new Map<string, { tx: PrivateTransaction[]; min: number; max: number; psms: number[] }>();
+  const byProject = new Map<string, { tx: PrivateTransaction[]; min: number; max: number; psms: number[]; sqms: number[] }>();
   for (const t of privateTx) {
     if (t.marketSegment !== userSegment) continue;
     const existing = byProject.get(t.project);
     if (!existing) {
-      byProject.set(t.project, { tx: [t], min: t.price, max: t.price, psms: [t.pricePerSqm] });
+      byProject.set(t.project, { tx: [t], min: t.price, max: t.price, psms: [t.pricePerSqm], sqms: [t.sqm] });
     } else {
       existing.tx.push(t);
       existing.min = Math.min(existing.min, t.price);
       existing.max = Math.max(existing.max, t.price);
       existing.psms.push(t.pricePerSqm);
+      existing.sqms.push(t.sqm);
     }
   }
   const privateListings: ProjectSummary[] = Array.from(byProject.entries())
-    .map(([project, { tx, min, max, psms }]) => ({
+    .map(([project, { tx, min, max, psms, sqms }]) => ({
       project,
       street:        tx[0].street,
       tenure:        tx[0].tenure,
@@ -398,6 +401,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
       medianPsm:     medianOf(psms),
       txCount:       tx.length,
       latestDate:    tx.sort((a, b) => b.contractDate.localeCompare(a.contractDate))[0].contractDate,
+      minSqm:        Math.min(...sqms),
+      maxSqm:        Math.max(...sqms),
     }))
     .sort((a, b) => b.txCount - a.txCount || b.latestDate.localeCompare(a.latestDate))
     .slice(0, 15);
@@ -671,6 +676,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
                 privateListings={privateListings}
                 userTown={town}
                 userSegment={userSegment}
+                numChildren={numChildren}
               />
             </div>
 

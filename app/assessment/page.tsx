@@ -58,6 +58,7 @@ export default function AssessmentPage() {
     sellingFirst:  "yes",
     myIncome:      "",
     wifeIncome:    "",
+    numChildren:   "0",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -147,6 +148,7 @@ export default function AssessmentPage() {
       sellingFirst:  form.sellingFirst,
       myIncome:      rawNum(form.myIncome),
       wifeIncome:    rawNum(form.wifeIncome)     || "0",
+      numChildren:   form.numChildren            || "0",
     });
     router.push(`/results?${p.toString()}`);
   }
@@ -412,6 +414,32 @@ export default function AssessmentPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Number of children */}
+              <div>
+                <label className="block text-sm font-semibold text-neutral-700 mb-1">
+                  Number of children
+                  <span className="text-neutral-400 font-normal ml-1 text-xs">helps us recommend room size</span>
+                </label>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {["0", "1", "2", "3", "4", "5+"].map((n) => (
+                    <button key={n} type="button"
+                      onClick={() => set("numChildren", n)}
+                      className={`rounded-2xl border-2 py-3 font-bold text-sm transition-all
+                        ${form.numChildren === n
+                          ? "border-amber-400 bg-amber-50 text-amber-700"
+                          : "border-neutral-200 bg-white text-neutral-900 hover:border-neutral-300"
+                        }`}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                {Number(form.numChildren) >= 3 && (
+                  <p className="text-xs text-amber-600 mt-1.5">
+                    We&apos;ll default to 3BR/4BR options — ideal for your family size
+                  </p>
+                )}
               </div>
 
               {/* Incomes */}
