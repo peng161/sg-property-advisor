@@ -262,9 +262,11 @@ function UpgradePathCard({
           Recommended Path
         </div>
       )}
-      <div className="text-center">
+      <div className="flex flex-col items-center">
         <div className="text-3xl mb-1">{meta.icon}</div>
-        <h3 className="font-bold text-slate-800 text-[13px] mb-2 leading-tight">{option.label}</h3>
+        <div className="h-9 flex items-center justify-center mb-2">
+          <h3 className="font-bold text-slate-800 text-[13px] leading-tight text-center">{option.label}</h3>
+        </div>
         <ScoreCircle score={score} recommended={isRecommended} />
       </div>
       <ul className="mt-3 space-y-1.5">
