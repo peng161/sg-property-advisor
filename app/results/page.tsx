@@ -199,6 +199,13 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     ? hdbTx.filter((t) => t.flatType === nextApiFlatType).slice(0, 12)
     : [];
 
+  const sameTypeHdbListings = apiFlatType
+    ? hdbTx
+        .filter((t) => t.flatType === apiFlatType)
+        .sort((a, b) => b.remainingLease - a.remainingLease || a.resalePrice - b.resalePrice)
+        .slice(0, 7)
+    : [];
+
   // Private listings with scores and trends
   const privateTx = await fetchPrivateTransactions();
   const TOWN_SEGMENT: Record<string, "OCR" | "RCR" | "CCR"> = {
@@ -307,6 +314,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
       ecListings={ecListings}
       biggerHdbListings={biggerHdbListings}
       nextFlatType={nextFlatType}
+      sameTypeHdbListings={sameTypeHdbListings}
     />
   );
 }

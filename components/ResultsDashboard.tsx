@@ -32,26 +32,27 @@ export interface EcSummary {
 }
 
 export interface DashboardProps {
-  assessment:       AssessmentResult;
-  optionScores:     number[];
-  gainPct:          number;
-  remainingLease:   number;
-  displayAddress:   string;
-  postalCode:       string;
-  numChildren:      number;
-  lat:              number;
-  lng:              number;
-  flatType:         string;
-  town:             string;
-  sqm:              number;
-  purchaseYear:     number;
-  purchasePrice:    number;
-  remainingLoan:    number;
-  sellingFirst:     boolean;
-  privateListings:  ExtendedProjectSummary[];
-  ecListings:       EcSummary[];
-  biggerHdbListings: HdbResaleRecord[];
-  nextFlatType:     string | null;
+  assessment:           AssessmentResult;
+  optionScores:         number[];
+  gainPct:              number;
+  remainingLease:       number;
+  displayAddress:       string;
+  postalCode:           string;
+  numChildren:          number;
+  lat:                  number;
+  lng:                  number;
+  flatType:             string;
+  town:                 string;
+  sqm:                  number;
+  purchaseYear:         number;
+  purchasePrice:        number;
+  remainingLoan:        number;
+  sellingFirst:         boolean;
+  privateListings:      ExtendedProjectSummary[];
+  ecListings:           EcSummary[];
+  biggerHdbListings:    HdbResaleRecord[];
+  nextFlatType:         string | null;
+  sameTypeHdbListings:  HdbResaleRecord[];
 }
 
 // ── Bedroom helpers ───────────────────────────────────────────────────────────
@@ -312,8 +313,6 @@ function PropertyCard({
   const estHigh = Math.round(listing.medianPsm * def.sqmHigh);
   const mortLow  = estimateMortgage(estLow);
   const mortHigh = estimateMortgage(estHigh);
-  const sqftLow  = Math.round(def.sqmLow  * 10.764);
-  const sqftHigh = Math.round(def.sqmHigh * 10.764);
   const suitability = familySuitability(selectedBr, numChildren);
   const utScore = unitTypeScore(listing.propertyScore, selectedBr, numChildren);
   const affordable = estLow <= budget;
@@ -374,7 +373,7 @@ function PropertyCard({
             <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Avg PSF ({selectedBr})</p>
+            <p className="text-[9px] text-slate-400">Avg PSM ({selectedBr})</p>
             <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
           </div>
           <div>
@@ -445,8 +444,8 @@ function PropertyCard({
         <div className="bg-slate-50 rounded-lg p-2 space-y-1 text-[10px] flex-1">
           <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
           {[
-            { label: "Est. Size", value: `${sqftLow} – ${sqftHigh} sqft` },
-            { label: "Recent Avg PSF", value: `$${fmt(listing.medianPsm)}` },
+            { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
+            { label: "Avg PSM", value: `$${fmt(listing.medianPsm)}` },
             { label: "Est. Monthly Mortgage", value: `$${fmt(mortLow)} – $${fmt(mortHigh)}` },
           ].map(({ label, value }) => (
             <div key={label} className="flex justify-between">
@@ -472,34 +471,18 @@ function PropertyCard({
 
 function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCode: string }) {
   const hasCoords = lat > 0 && lng > 0;
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
+  const apiKey = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
 
-  // Google Maps Embed API — "place" mode when we have a postal code,
-  // "view" mode centred on coordinates otherwise.
-  let src = "";
-  if (apiKey) {
-    if (hasCoords) {
-      src =
-        `https://www.google.com/maps/embed/v1/view` +
-        `?key=${apiKey}` +
-        `&center=${lat},${lng}` +
-        `&zoom=15` +
-        `&maptype=roadmap`;
-    } else if (postalCode) {
-      src =
-        `https://www.google.com/maps/embed/v1/place` +
-        `?key=${apiKey}` +
-        `&q=Singapore+${postalCode}` +
-        `&zoom=15`;
-    }
-  }
+  const src = apiKey && hasCoords
+    ? `https://api.maptiler.com/maps/streets-v2/?key=${apiKey}#15/${lat}/${lng}`
+    : "";
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ minHeight: 420 }}>
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div>
           <p className="font-semibold text-slate-800 text-sm">Property Map</p>
-          <p className="text-[10px] text-slate-400">Within 1.5 km radius</p>
+          <p className="text-[10px] text-slate-400">Your neighbourhood</p>
         </div>
         <div className="text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
           Postal: {postalCode || "—"}
@@ -512,22 +495,21 @@ function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCo
             src={src}
             className="w-full h-full border-0 absolute inset-0"
             style={{ minHeight: 360 }}
-            title="Google Maps — Property Location"
+            title="MapTiler — Property Location"
             allowFullScreen
-            referrerPolicy="no-referrer-when-downgrade"
           />
         ) : !apiKey ? (
           <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 gap-3 px-6 text-center" style={{ minHeight: 360 }}>
             <span className="text-3xl">🗺️</span>
-            <p className="text-sm font-semibold text-slate-600">Google Maps not configured</p>
+            <p className="text-sm font-semibold text-slate-600">Map not configured</p>
             <p className="text-xs text-slate-400 leading-relaxed">
               Add your key to <code className="bg-slate-100 px-1 rounded text-[11px]">.env.local</code>:
             </p>
             <code className="text-[10px] bg-slate-100 text-slate-600 rounded px-2 py-1 break-all">
-              NEXT_PUBLIC_GOOGLE_MAPS_KEY=your_key
+              NEXT_PUBLIC_MAPTILER_KEY=your_key
             </code>
             <p className="text-[10px] text-slate-400">
-              Enable <strong>Maps Embed API</strong> in Google Cloud Console.
+              Get a free key at <strong>maptiler.com</strong>.
             </p>
           </div>
         ) : (
@@ -540,8 +522,7 @@ function MapPanel({ lat, lng, postalCode }: { lat: number; lng: number; postalCo
       <div className="px-4 py-2 border-t border-slate-100 flex gap-4 flex-wrap">
         {[
           { icon: "🏠", label: "Your Home" },
-          { icon: "🏙️", label: "Recommended Property" },
-          { icon: "⭕", label: "1.5 km Radius" },
+          { icon: "🏙️", label: "Nearby Properties" },
         ].map(({ icon, label }) => (
           <div key={label} className="flex items-center gap-1 text-[9px] text-slate-500">
             <span>{icon}</span><span>{label}</span>
@@ -558,7 +539,7 @@ export default function ResultsDashboard({
   assessment, optionScores, gainPct, remainingLease,
   displayAddress, postalCode, numChildren, lat, lng,
   flatType, town, purchaseYear, purchasePrice, remainingLoan, sellingFirst,
-  privateListings, ecListings, biggerHdbListings, nextFlatType,
+  privateListings, ecListings, biggerHdbListings, nextFlatType, sameTypeHdbListings,
 }: DashboardProps) {
   // Filter state
   const [propType, setPropType] = useState<"Condo" | "EC" | "HDB">("Condo");
@@ -802,19 +783,52 @@ export default function ResultsDashboard({
               <div className="flex items-center gap-3">
                 <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">2</div>
                 <div>
-                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide flex items-center gap-2">
-                    Top {shownListings.length} Recommended Properties
-                    <span className="text-xs font-normal text-slate-400 normal-case">
-                      ({propType === "Condo" ? "Private Condo" : propType})
-                    </span>
-                  </h2>
-                  <p className="text-[10px] text-slate-400">
-                    <span className="text-emerald-600">✓</span> Scored by affordability, location, family fit & market data
-                  </p>
+                  {selectedUpgrade === "Stay" ? (
+                    <>
+                      <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">
+                        Top {sameTypeHdbListings.length} {flatType} Listings Near You
+                      </h2>
+                      <p className="text-[10px] text-slate-400">
+                        <span className="text-emerald-600">✓</span> Recent resale transactions sorted by remaining lease
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="font-black text-slate-900 text-base uppercase tracking-wide flex items-center gap-2">
+                        Top {shownListings.length} Recommended Properties
+                        <span className="text-xs font-normal text-slate-400 normal-case">
+                          ({propType === "Condo" ? "Private Condo" : propType})
+                        </span>
+                      </h2>
+                      <p className="text-[10px] text-slate-400">
+                        <span className="text-emerald-600">✓</span> Scored by affordability, location, family fit & market data
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {propType === "Condo" && displayedListings.length > 0 ? (
+              {selectedUpgrade === "Stay" ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <p className="font-semibold text-slate-700 mb-3">
+                    Recent {flatType} Resale in {town || "your area"}
+                  </p>
+                  {sameTypeHdbListings.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {sameTypeHdbListings.map((t, i) => (
+                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                          <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
+                          <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
+                          <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm · {t.remainingLease}yr lease</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No recent {flatType} transactions found in {town || "your area"}.</p>
+                  )}
+                </div>
+              ) : propType === "Condo" && displayedListings.length > 0 ? (
                 <>
                   {displayedListings.map((listing, i) => (
                     <PropertyCard
