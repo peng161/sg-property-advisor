@@ -9,10 +9,12 @@ import ResultsDashboard from "@/components/ResultsDashboard";
 import type { ExtendedProjectSummary } from "@/components/ResultsDashboard";
 import {
   getHdbNearby,
+  getHdbByTown,
   getPrivateProjectsNearby,
   haversineKm,
 } from "@/lib/dbQueries";
-import { isMongoConfigured } from "@/lib/mongodb";
+import { isDbReady } from "@/lib/sqlite";
+import { isMongoConfigured } from "@/lib/mongodb"; // kept for private listings gate
 import { getUserFinancialProfile } from "@/lib/financialProfile";
 import { isMyinfoConfigured } from "@/lib/myinfo/config";
 
@@ -313,6 +315,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   }
 
   // ── HDB: same flat type nearby (for "Stay" path) ──────────────────────────
+  // Priority: proximity search from DB → town search from DB → API fallback
 
   let sameTypeHdbListings = hdbTx
     .filter((t) => t.flatType === apiFlatType)
@@ -320,23 +323,42 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     .slice(0, 7);
 
   let hdbFromDb = false;
-  if (hasUserCoords && isMongoConfigured() && apiFlatType) {
-    const { records, fromDb } = await getHdbNearby(lat, lng, apiFlatType, result.hdbBudget);
-    if (fromDb && records.length > 0) {
-      sameTypeHdbListings = records;
-      hdbFromDb = true;
+  if (apiFlatType && isDbReady()) {
+    if (hasUserCoords) {
+      const { records, fromDb } = await getHdbNearby(lat, lng, apiFlatType, result.hdbBudget);
+      if (fromDb && records.length > 0) {
+        sameTypeHdbListings = records;
+        hdbFromDb = true;
+      }
+    }
+    // No precise coords — fall back to town-level DB query
+    if (!hdbFromDb && town) {
+      const { records, fromDb } = await getHdbByTown(town, apiFlatType, 7);
+      if (fromDb && records.length > 0) {
+        sameTypeHdbListings = records;
+        hdbFromDb = true;
+      }
     }
   }
 
   // ── HDB upgrade listings ──────────────────────────────────────────────────
+  // Priority: town search from DB → API fallback
 
   const FLAT_ORDER = ["3-Room", "4-Room", "5-Room", "Executive"] as const;
   const nextFlatType: string | null =
     FLAT_ORDER[FLAT_ORDER.indexOf(input.flatType as typeof FLAT_ORDER[number]) + 1] ?? null;
   const nextApiFlatType = nextFlatType ? FLAT_TYPE_API[nextFlatType] : null;
-  const biggerHdbListings = nextApiFlatType
+
+  let biggerHdbListings = nextApiFlatType
     ? hdbTx.filter((t) => t.flatType === nextApiFlatType).slice(0, 12)
     : [];
+
+  if (nextApiFlatType && town && isDbReady()) {
+    const { records, fromDb } = await getHdbByTown(town, nextApiFlatType, 12);
+    if (fromDb && records.length > 0) {
+      biggerHdbListings = records;
+    }
+  }
 
   // ── Misc ──────────────────────────────────────────────────────────────────
 
@@ -361,7 +383,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     dbProjectsWithin1_5km: dbProjectCount,
     privateSource: dbUsed ? "SQLite (1.5 km radius)" : "API (district centroid)",
     hdbSource: hdbFromDb ? "SQLite (1.5 km radius)" : "API (town filter)",
-    dbReady: isMongoConfigured(),
+    dbReady: isDbReady(),
   };
 
   return (

@@ -163,6 +163,52 @@ export async function getPrivateProjectsNearby(
   }
 }
 
+// ── HDB by town ───────────────────────────────────────────────────────────────
+// Used when no user coordinates are available (no postal code entered) or when
+// fetching a different flat type (e.g. "Bigger HDB" path).
+
+export async function getHdbByTown(
+  town: string, flatType: string, limit = 12,
+): Promise<{ records: HdbResaleRecord[]; fromDb: boolean }> {
+  const db = getDb();
+  if (!db) return { records: [], fromDb: false };
+
+  try {
+    const result = await db.execute({
+      sql: `SELECT * FROM hdb_tx
+            WHERE UPPER(town) = UPPER(?)
+              AND flat_type = ?
+            ORDER BY month DESC LIMIT ?`,
+      args: [town, flatType, limit],
+    });
+
+    const records: HdbResaleRecord[] = result.rows
+      .map((row) => {
+        const price = n(row.resale_price);
+        const sqm   = n(row.sqm);
+        if (!price || !sqm) return null;
+        return {
+          block:             s(row.block),
+          streetName:        s(row.street_name),
+          town:              s(row.town),
+          flatType:          s(row.flat_type),
+          storeyRange:       s(row.storey_range),
+          sqm,
+          resalePrice:       price,
+          pricePerSqm:       n(row.price_per_sqm),
+          month:             s(row.month),
+          leaseCommenceYear: n(row.lease_commence_year),
+          remainingLease:    n(row.remaining_lease),
+        };
+      })
+      .filter((r): r is HdbResaleRecord => r !== null);
+
+    return { records, fromDb: true };
+  } catch {
+    return { records: [], fromDb: false };
+  }
+}
+
 export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number; privateCount: number }> {
   const db = getDb();
   if (!db) return { connected: false, hdbCount: 0, privateCount: 0 };
