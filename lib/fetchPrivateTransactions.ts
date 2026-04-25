@@ -64,53 +64,53 @@ async function getUraToken(accessKey: string): Promise<string> {
 async function fetchFromUra(accessKey: string): Promise<PrivateTransaction[]> {
   const token = await getUraToken(accessKey);
 
-  // Batch 1 = most recent quarter; fetch batches 1–4 for ~1 year of data
-  const batches = await Promise.all(
-    [1, 2, 3, 4].map((b) =>
-      fetch(
-        `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${b}`,
-        {
-          headers: { AccessKey: accessKey, Token: token },
-          next: { revalidate: 3600 },
-        }
-      ).then((r) => r.json())
-    )
-  );
-
-  const condoTypes = new Set(["Condominium", "Apartment"]);
+  const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
   const all: PrivateTransaction[] = [];
-  const cutoff = new Date().getFullYear() - 3; // last 3 years
+  const cutoff = new Date().getFullYear() - 10;
 
-  for (const batch of batches) {
-    if (batch.Status !== "Success" || !Array.isArray(batch.Result)) continue;
+  // Fetch batches sequentially — URA token is session-scoped; parallel calls can collide.
+  // Each batch covers ~1 quarter; try up to 20 batches (~5 years), stop on 2 consecutive failures.
+  let consecutive = 0;
+  for (let b = 1; b <= 20; b++) {
+    try {
+      const res = await fetch(
+        `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${b}`,
+        { headers: { AccessKey: accessKey, Token: token }, next: { revalidate: 86400 } }
+      );
+      const json = await res.json() as { Status: string; Result: UraRaw[] };
+      if (json.Status !== "Success" || !Array.isArray(json.Result)) {
+        if (++consecutive >= 2) break;
+        continue;
+      }
+      consecutive = 0;
 
-    for (const raw of batch.Result as UraRaw[]) {
-      if (!condoTypes.has(raw.propertyType)) continue;
-      const price = Number(raw.price);
-      const sqm   = Number(raw.area);
-      if (!price || !sqm) continue;
+      for (const raw of json.Result) {
+        if (!condoTypes.has(raw.propertyType)) continue;
+        const price = Number(raw.price);
+        const sqm   = Number(raw.area);
+        if (!price || !sqm) continue;
 
-      const date = parseDate(raw.contractDate);
-      if (Number(date.slice(0, 4)) < cutoff) continue;
+        const date = parseDate(raw.contractDate);
+        if (Number(date.slice(0, 4)) < cutoff) continue;
 
-      const seg = (raw.marketSegment ?? "OCR").toUpperCase();
-      const marketSegment =
-        seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR";
-
-      all.push({
-        project:       raw.project ?? "Unknown",
-        street:        raw.street ?? "",
-        district:      raw.district ?? "",
-        marketSegment,
-        propertyType:  raw.propertyType,
-        tenure:        parseTenure(raw.tenure),
-        typeOfSale:    raw.typeOfSale ?? "",
-        price,
-        sqm,
-        pricePerSqm:   Math.round(price / sqm),
-        floorRange:    raw.floorRange ?? "",
-        contractDate:  date,
-      });
+        const seg = (raw.marketSegment ?? "OCR").toUpperCase();
+        all.push({
+          project:       raw.project ?? "Unknown",
+          street:        raw.street ?? "",
+          district:      raw.district ?? "",
+          marketSegment: seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR",
+          propertyType:  raw.propertyType,
+          tenure:        parseTenure(raw.tenure),
+          typeOfSale:    raw.typeOfSale ?? "",
+          price,
+          sqm,
+          pricePerSqm:   Math.round(price / sqm),
+          floorRange:    raw.floorRange ?? "",
+          contractDate:  date,
+        });
+      }
+    } catch {
+      if (++consecutive >= 2) break;
     }
   }
 

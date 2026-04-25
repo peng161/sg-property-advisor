@@ -1,24 +1,25 @@
 /**
- * Seed script — pulls 5 years of HDB + private transactions, geocodes unique
- * addresses via OneMap, and upserts into MongoDB.
+ * Seed script — pulls 10 years of HDB + private transactions, geocodes unique
+ * addresses via OneMap, and writes to a local SQLite database.
  *
  * Run once:  npm run seed
- * Requires:  MONGODB_URI in .env.local
- *            URA_ACCESS_KEY in .env.local (optional — uses mock private data without it)
+ * Requires:  URA_ACCESS_KEY in .env.local  (optional — skips private data without it)
+ *
+ * Output:  data/sg-property.db  (~50–200 MB depending on data volume)
  */
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import mongoose from "mongoose";
-import { HdbTx } from "../lib/models/HdbTx";
-import { PrivateProject } from "../lib/models/PrivateProject";
+import path from "path";
+import fs from "fs";
+import Database from "better-sqlite3";
 
 // ── constants ────────────────────────────────────────────────────────────────
 
-const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
-const CURRENT_YEAR    = new Date().getFullYear();
-const START_YEAR      = CURRENT_YEAR - 5;
+const DB_PATH      = path.join(process.cwd(), "data", "sg-property.db");
+const CURRENT_YEAR = new Date().getFullYear();
+const START_YEAR   = CURRENT_YEAR - 10;
 
 const DISTRICT_CENTROIDS: Record<string, [number, number]> = {
   "01": [1.2810, 103.8508], "02": [1.2760, 103.8423], "03": [1.2894, 103.8083],
@@ -32,17 +33,6 @@ const DISTRICT_CENTROIDS: Record<string, [number, number]> = {
   "25": [1.4340, 103.7760], "26": [1.4000, 103.8190], "27": [1.4320, 103.8320],
   "28": [1.4040, 103.8700],
 };
-
-// ── types ─────────────────────────────────────────────────────────────────────
-
-interface RawHdb { [key: string]: string }
-
-interface PrivateTx {
-  project: string; street: string; district: string;
-  marketSegment: "OCR" | "RCR" | "CCR"; tenure: string;
-  price: number; sqm: number; pricePerSqm: number;
-  contractDate: string; // "YYYY-MM"
-}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -69,7 +59,7 @@ function parseTenure(raw: string): string {
   return raw.slice(0, 40);
 }
 
-function trend3Y(dates: string[], psms: number[]): number {
+function calcTrend(dates: string[], psms: number[]): number {
   if (dates.length < 2) return 0;
   const pairs = dates.map((d, i) => ({ d, psm: psms[i] })).sort((a, b) => a.d.localeCompare(b.d));
   const first = pairs[0].psm;
@@ -85,9 +75,9 @@ async function geocodeOneMap(query: string): Promise<[number, number] | null> {
   if (geoCache.has(query)) return geoCache.get(query)!;
   const url = `https://www.onemap.gov.sg/api/common/elastic/search?searchVal=${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y&pageNum=1`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
     const json = await res.json() as { results?: { LATITUDE: string; LONGITUDE?: string; LONGTITUDE?: string }[] };
-    const r = json.results?.[0];
+    const r    = json.results?.[0];
     if (!r) { geoCache.set(query, null); return null; }
     const lat = Number(r.LATITUDE);
     const lng = Number(r.LONGITUDE ?? r.LONGTITUDE);
@@ -103,7 +93,7 @@ async function geocodeOneMap(query: string): Promise<[number, number] | null> {
 async function geocodeBulk(queries: string[], concurrency = 8, delayMs = 150) {
   const out = new Map<string, [number, number] | null>();
   for (let i = 0; i < queries.length; i += concurrency) {
-    const batch = queries.slice(i, i + concurrency);
+    const batch   = queries.slice(i, i + concurrency);
     const results = await Promise.all(batch.map(async (q) => [q, await geocodeOneMap(q)] as const));
     for (const [q, r] of results) out.set(q, r);
     if (i + concurrency < queries.length) await sleep(delayMs);
@@ -113,7 +103,62 @@ async function geocodeBulk(queries: string[], concurrency = 8, delayMs = 150) {
   return out;
 }
 
-// ── HDB data fetching ─────────────────────────────────────────────────────────
+// ── SQLite setup ──────────────────────────────────────────────────────────────
+
+function openDb(): Database.Database {
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  const db = new Database(DB_PATH);
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS hdb_tx (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      block                TEXT    NOT NULL,
+      street_name          TEXT    NOT NULL,
+      town                 TEXT,
+      flat_type            TEXT    NOT NULL,
+      storey_range         TEXT,
+      sqm                  REAL,
+      resale_price         INTEGER,
+      price_per_sqm        INTEGER,
+      month                TEXT,
+      lease_commence_year  INTEGER,
+      remaining_lease      INTEGER,
+      lat                  REAL    NOT NULL,
+      lng                  REAL    NOT NULL,
+      UNIQUE(block, street_name, flat_type, storey_range, month)
+    );
+    CREATE INDEX IF NOT EXISTS idx_hdb_loc      ON hdb_tx(lat, lng);
+    CREATE INDEX IF NOT EXISTS idx_hdb_flattype ON hdb_tx(flat_type);
+
+    CREATE TABLE IF NOT EXISTS private_project (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      project        TEXT    NOT NULL UNIQUE,
+      street         TEXT,
+      district       TEXT,
+      market_segment TEXT,
+      tenure         TEXT,
+      min_price      INTEGER,
+      max_price      INTEGER,
+      median_psm     INTEGER,
+      tx_count       INTEGER,
+      latest_date    TEXT,
+      min_sqm        REAL,
+      max_sqm        REAL,
+      trend_3y       REAL,
+      lat            REAL    NOT NULL,
+      lng            REAL    NOT NULL
+    );
+  `);
+  return db;
+}
+
+// ── HDB fetching ──────────────────────────────────────────────────────────────
+
+const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+
+interface RawHdb { [key: string]: string }
 
 async function fetchHdbYear(year: number): Promise<RawHdb[]> {
   const rows: RawHdb[] = [];
@@ -121,7 +166,7 @@ async function fetchHdbYear(year: number): Promise<RawHdb[]> {
   const limit = 5000;
   while (true) {
     const sql = `SELECT * FROM "${HDB_RESOURCE_ID}" WHERE month >= '${year}-01' AND month <= '${year}-12' LIMIT ${limit} OFFSET ${offset}`;
-    const url  = `https://data.gov.sg/api/action/datastore_search_sql?sql=${encodeURIComponent(sql)}`;
+    const url = `https://data.gov.sg/api/action/datastore_search_sql?sql=${encodeURIComponent(sql)}`;
     try {
       const res  = await fetch(url, { signal: AbortSignal.timeout(30000) });
       const json = await res.json() as { result?: { records?: RawHdb[] } };
@@ -138,17 +183,24 @@ async function fetchHdbYear(year: number): Promise<RawHdb[]> {
   return rows;
 }
 
-// ── private transaction fetching (URA) ────────────────────────────────────────
+// ── Private transaction fetching (URA) ────────────────────────────────────────
+
+interface PrivateTx {
+  project: string; street: string; district: string;
+  marketSegment: "OCR" | "RCR" | "CCR"; tenure: string;
+  price: number; sqm: number; pricePerSqm: number; contractDate: string;
+}
 
 async function fetchPrivateTxs(): Promise<PrivateTx[]> {
   const accessKey = process.env.URA_ACCESS_KEY;
   if (!accessKey) {
-    console.log("  No URA_ACCESS_KEY — skipping private data (run with key for real data)");
+    console.log("  No URA_ACCESS_KEY — skipping private data");
+    console.log("  Get a free key at: https://eservice.ura.gov.sg/uraDataService/");
     return [];
   }
 
   try {
-    const tokenRes = await fetch(
+    const tokenRes  = await fetch(
       "https://eservice.ura.gov.sg/uraDataService/insertNewToken.action?service=PMI_Resi_Transaction",
       { headers: { AccessKey: accessKey } }
     );
@@ -158,26 +210,28 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
 
     const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
     const all: PrivateTx[] = [];
-    const cutoffYear = CURRENT_YEAR - 5;
+    const cutoffYear = CURRENT_YEAR - 10;
 
-    // URA batches — each covers ~6 months. Try 1-10 to get ~5 years; stop on consecutive failures.
     let consecutive = 0;
-    for (let batch = 1; batch <= 10; batch++) {
+    for (let batch = 1; batch <= 20; batch++) {
       process.stdout.write(`  Fetching URA batch ${batch}... `);
       try {
         const res = await fetch(
           `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${batch}`,
           { headers: { AccessKey: accessKey, Token: token }, signal: AbortSignal.timeout(30000) }
         );
-        const json = await res.json() as { Status: string; Result: { project: string; street: string; district: string; marketSegment: string; propertyType: string; tenure: string; price: string; area: string; contractDate: string }[] };
+        const json = await res.json() as {
+          Status: string;
+          Result: { project: string; street: string; district: string; marketSegment: string; propertyType: string; tenure: string; price: string; area: string; contractDate: string }[]
+        };
         if (json.Status !== "Success" || !Array.isArray(json.Result)) {
-          console.log(`no data`);
+          console.log("no data");
           if (++consecutive >= 2) break;
           continue;
         }
         consecutive = 0;
 
-        let batchCount = 0;
+        let count = 0;
         for (const raw of json.Result) {
           if (!condoTypes.has(raw.propertyType)) continue;
           const price = Number(raw.price);
@@ -186,8 +240,8 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
           const yy   = raw.contractDate.slice(0, 2);
           const mm   = raw.contractDate.slice(2, 4);
           const year = Number(yy) < 50 ? `20${yy}` : `19${yy}`;
-          if (Number(year) < cutoffYear) continue; // skip older than 5 years
-          const seg  = (raw.marketSegment ?? "OCR").toUpperCase();
+          if (Number(year) < cutoffYear) continue;
+          const seg = (raw.marketSegment ?? "OCR").toUpperCase();
           all.push({
             project:       raw.project,
             street:        raw.street,
@@ -199,9 +253,9 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
             pricePerSqm:   Math.round(price / sqm),
             contractDate:  `${year}-${mm}`,
           });
-          batchCount++;
+          count++;
         }
-        console.log(`${batchCount} txs (${json.Result.length} raw)`);
+        console.log(`${count} txs (${json.Result.length} raw)`);
         await sleep(600);
       } catch (e) {
         console.log(`failed: ${e}`);
@@ -218,12 +272,8 @@ async function fetchPrivateTxs(): Promise<PrivateTx[]> {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) { console.error("❌  MONGODB_URI not set in .env.local"); process.exit(1); }
-
-  console.log("Connecting to MongoDB...");
-  await mongoose.connect(uri, { bufferCommands: false });
-  console.log("✓  Connected\n");
+  console.log(`Opening SQLite: ${DB_PATH}\n`);
+  const db = openDb();
 
   // ── HDB ────────────────────────────────────────────────────────────────────
 
@@ -238,55 +288,44 @@ async function main() {
   }
   console.log(`Total HDB records: ${allHdb.length}\n`);
 
-  // Geocode unique HDB block+street
   const uniqueHdbAddr = [...new Set(allHdb.map((r) => `BLK ${r.block} ${r.street_name}`))];
-  console.log(`Geocoding ${uniqueHdbAddr.length} unique HDB addresses via OneMap...`);
+  console.log(`Geocoding ${uniqueHdbAddr.length} unique HDB addresses...`);
   const hdbGeo = await geocodeBulk(uniqueHdbAddr);
+  const geocoded = [...hdbGeo.values()].filter(Boolean).length;
+  console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueHdbAddr.length - geocoded}\n`);
 
-  const geocoded  = [...hdbGeo.values()].filter(Boolean).length;
-  const notFound  = uniqueHdbAddr.length - geocoded;
-  console.log(`  Geocoded: ${geocoded}  Not found: ${notFound}\n`);
+  console.log("Writing HDB transactions to SQLite...");
+  const insertHdb = db.prepare(`
+    INSERT OR REPLACE INTO hdb_tx
+      (block, street_name, town, flat_type, storey_range, sqm, resale_price,
+       price_per_sqm, month, lease_commence_year, remaining_lease, lat, lng)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
 
-  // Upsert HDB records
-  console.log("Upserting HDB transactions into MongoDB...");
-  let hdbOk = 0, hdbSkip = 0;
-  for (const row of allHdb) {
-    const key    = `BLK ${row.block} ${row.street_name}`;
-    const coords = hdbGeo.get(key);
-    if (!coords) { hdbSkip++; continue; }
-
-    const price = Number(row.resale_price);
-    const sqm   = Number(row.floor_area_sqm);
-    if (!price || !sqm) { hdbSkip++; continue; }
-
-    const [lat, lng] = coords;
-    try {
-      await HdbTx.updateOne(
-        { block: row.block, streetName: row.street_name, flatType: row.flat_type, storeyRange: row.storey_range, month: row.month },
-        { $set: {
-          block:             row.block,
-          streetName:        row.street_name,
-          town:              row.town ?? "",
-          flatType:          row.flat_type,
-          storeyRange:       row.storey_range,
-          sqm,
-          resalePrice:       price,
-          pricePerSqm:       Math.round(price / sqm),
-          month:             row.month,
-          leaseCommenceYear: Number(row.lease_commence_date) || 0,
-          remainingLease:    parseRemainingLease(row.remaining_lease ?? ""),
-          location:          { type: "Point", coordinates: [lng, lat] },
-        }},
-        { upsert: true }
+  const insertManyHdb = db.transaction((rows: RawHdb[]) => {
+    let ok = 0;
+    for (const row of rows) {
+      const key    = `BLK ${row.block} ${row.street_name}`;
+      const coords = hdbGeo.get(key);
+      if (!coords) continue;
+      const price = Number(row.resale_price);
+      const sqm   = Number(row.floor_area_sqm);
+      if (!price || !sqm) continue;
+      const [lat, lng] = coords;
+      insertHdb.run(
+        row.block, row.street_name, row.town ?? "", row.flat_type,
+        row.storey_range, sqm, price, Math.round(price / sqm), row.month,
+        Number(row.lease_commence_date) || 0,
+        parseRemainingLease(row.remaining_lease ?? ""),
+        lat, lng
       );
-      hdbOk++;
-    } catch (e: any) {
-      if (e.code !== 11000) console.error("\nHDB upsert error:", e.message);
-      hdbSkip++;
+      ok++;
     }
-    if (hdbOk % 1000 === 0) process.stdout.write(`\r  ${hdbOk} upserted...`);
-  }
-  console.log(`\n  Done: ${hdbOk} upserted, ${hdbSkip} skipped\n`);
+    return ok;
+  });
+
+  const hdbOk = insertManyHdb(allHdb);
+  console.log(`  Done: ${hdbOk} rows written\n`);
 
   // ── Private ────────────────────────────────────────────────────────────────
 
@@ -295,17 +334,17 @@ async function main() {
   console.log(`Total private transactions: ${privateTxs.length}\n`);
 
   if (privateTxs.length > 0) {
-    // Aggregate by project
-    type ProjectBucket = {
+    type Bucket = {
       street: string; district: string; marketSegment: "OCR" | "RCR" | "CCR"; tenure: string;
       prices: number[]; psms: number[]; sqms: number[]; dates: string[];
     };
-    const byProject = new Map<string, ProjectBucket>();
+    const byProject = new Map<string, Bucket>();
     for (const tx of privateTxs) {
       const b = byProject.get(tx.project);
       if (!b) {
         byProject.set(tx.project, {
-          street: tx.street, district: tx.district, marketSegment: tx.marketSegment, tenure: tx.tenure,
+          street: tx.street, district: tx.district,
+          marketSegment: tx.marketSegment, tenure: tx.tenure,
           prices: [tx.price], psms: [tx.pricePerSqm], sqms: [tx.sqm], dates: [tx.contractDate],
         });
       } else {
@@ -314,56 +353,51 @@ async function main() {
       }
     }
 
-    // Geocode unique streets
     const uniqueStreets = [...new Set([...byProject.values()].map((p) => p.street))];
     console.log(`Geocoding ${uniqueStreets.length} private project streets...`);
     const privateGeo = await geocodeBulk(uniqueStreets, 5, 200);
 
-    // Upsert private projects
-    console.log("Upserting private projects...");
-    let privOk = 0;
-    for (const [project, b] of byProject) {
-      const coords = privateGeo.get(b.street);
-      const centroid = DISTRICT_CENTROIDS[b.district.padStart(2, "0")] ?? [1.3521, 103.8198];
-      const [lat, lng] = coords ?? centroid;
+    console.log("Writing private projects to SQLite...");
+    const insertPrivate = db.prepare(`
+      INSERT OR REPLACE INTO private_project
+        (project, street, district, market_segment, tenure, min_price, max_price,
+         median_psm, tx_count, latest_date, min_sqm, max_sqm, trend_3y, lat, lng)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
 
-      const sortedDates = [...b.dates].sort();
-      try {
-        await PrivateProject.updateOne(
-          { project },
-          { $set: {
-            project,
-            street:        b.street,
-            district:      b.district,
-            marketSegment: b.marketSegment,
-            tenure:        b.tenure,
-            minPrice:      Math.min(...b.prices),
-            maxPrice:      Math.max(...b.prices),
-            medianPsm:     median(b.psms),
-            txCount:       b.prices.length,
-            latestDate:    sortedDates[sortedDates.length - 1],
-            minSqm:        Math.min(...b.sqms),
-            maxSqm:        Math.max(...b.sqms),
-            trend3Y:       trend3Y(b.dates, b.psms),
-            location:      { type: "Point", coordinates: [lng, lat] },
-          }},
-          { upsert: true }
+    const insertManyPrivate = db.transaction((entries: [string, Bucket][]) => {
+      let ok = 0;
+      for (const [project, b] of entries) {
+        const coords   = privateGeo.get(b.street);
+        const centroid = DISTRICT_CENTROIDS[b.district.padStart(2, "0")] ?? [1.3521, 103.8198];
+        const [lat, lng] = coords ?? centroid;
+        const sortedDates = [...b.dates].sort();
+        insertPrivate.run(
+          project, b.street, b.district, b.marketSegment, b.tenure,
+          Math.min(...b.prices), Math.max(...b.prices),
+          median(b.psms), b.prices.length,
+          sortedDates[sortedDates.length - 1],
+          Math.min(...b.sqms), Math.max(...b.sqms),
+          calcTrend(b.dates, b.psms),
+          lat, lng
         );
-        privOk++;
-      } catch (e: any) {
-        if (e.code !== 11000) console.error("\nPrivate upsert error:", e.message);
+        ok++;
       }
-    }
-    console.log(`  Done: ${privOk} projects upserted\n`);
+      return ok;
+    });
+
+    const privOk = insertManyPrivate([...byProject.entries()]);
+    console.log(`  Done: ${privOk} projects written\n`);
   }
 
-  const hdbCount  = await HdbTx.countDocuments();
-  const privCount = await PrivateProject.countDocuments();
+  const hdbCount  = (db.prepare("SELECT COUNT(*) as n FROM hdb_tx").get() as { n: number }).n;
+  const privCount = (db.prepare("SELECT COUNT(*) as n FROM private_project").get() as { n: number }).n;
+  db.close();
+
   console.log("✓  Seed complete");
-  console.log(`   HDB transactions:  ${hdbCount}`);
-  console.log(`   Private projects:  ${privCount}`);
+  console.log(`   HDB transactions:  ${hdbCount.toLocaleString()}`);
+  console.log(`   Private projects:  ${privCount.toLocaleString()}`);
+  console.log(`   Database:          ${DB_PATH}`);
 }
 
-main()
-  .catch((e) => { console.error("Seed failed:", e); process.exit(1); })
-  .finally(() => mongoose.disconnect());
+main().catch((e) => { console.error("Seed failed:", e); process.exit(1); });

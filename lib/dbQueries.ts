@@ -1,16 +1,14 @@
 /**
- * MongoDB query helpers for the results page.
- * When MONGODB_URI is set and the DB is seeded, these replace the API-based
- * lookups and enable real 1.5 km radius filtering.
+ * SQLite query helpers for the results page.
+ * Replaces the previous MongoDB/Mongoose implementation.
+ * Geospatial filtering uses a lat/lng bounding box + haversine JS check.
  */
 
-import { connectDb } from "./mongodb";
-import { HdbTx } from "./models/HdbTx";
-import { PrivateProject } from "./models/PrivateProject";
+import { getDb } from "./sqlite";
 import type { HdbResaleRecord } from "./fetchHdb";
 import type { ExtendedProjectSummary } from "@/components/ResultsDashboard";
 
-const NEARBY_DIST_M = 1500; // 1.5 km — preferred range, used as bonus not hard cutoff
+const NEARBY_DIST_KM = 1.5;
 
 // ── Geo helper ────────────────────────────────────────────────────────────────
 
@@ -25,7 +23,14 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ── Layer 2 scoring — HDB (ranks options within "Stay" / "Bigger HDB" path) ──
+// 1.5 km in degrees (approximate, good enough for bounding-box pre-filter)
+function deltaDeg(lat: number) {
+  const latDelta = NEARBY_DIST_KM / 111.32;
+  const lngDelta = NEARBY_DIST_KM / (111.32 * Math.cos(lat * Math.PI / 180));
+  return { latDelta, lngDelta };
+}
+
+// ── Layer 2 scoring — HDB ─────────────────────────────────────────────────────
 
 function scoreHdb(
   remainingLease: number,
@@ -34,23 +39,15 @@ function scoreHdb(
   budget: number,
   distKm: number,
 ): number {
-  // Remaining lease — highest weight (0-40)
-  const leaseScore = remainingLease > 0 ? Math.min(remainingLease / 99, 1) * 40 : 0;
-
-  // Affordability (0-30)
-  const priceScore = resalePrice <= budget ? 30 : resalePrice <= budget * 1.1 ? 15 : 5;
-
-  // Floor level (0-15)
-  const floorLow = parseInt(storeyRange) || 1;
-  const floorScore = Math.min(floorLow / 25, 1) * 15;
-
-  // Distance within 1.5 km (0-15)
-  const distScore = distKm < 0.5 ? 15 : distKm < 1 ? 11 : 7;
-
+  const leaseScore  = remainingLease > 0 ? Math.min(remainingLease / 99, 1) * 40 : 0;
+  const priceScore  = resalePrice <= budget ? 30 : resalePrice <= budget * 1.1 ? 15 : 5;
+  const floorLow    = parseInt(storeyRange) || 1;
+  const floorScore  = Math.min(floorLow / 25, 1) * 15;
+  const distScore   = distKm < 0.5 ? 15 : distKm < 1 ? 11 : 7;
   return Math.round(leaseScore + priceScore + floorScore + distScore);
 }
 
-// ── Layer 2 scoring — Private (ranks options within "Private Condo" path) ─────
+// ── Layer 2 scoring — Private ─────────────────────────────────────────────────
 
 function scorePrivateProject(
   minPrice: number,
@@ -60,87 +57,87 @@ function scorePrivateProject(
   budget: number,
   distKm: number,
 ): number {
-  let score = 30; // base
-
-  // Distance — decays gradually across Singapore (0-30)
-  score += distKm < 0.5 ? 30
-         : distKm < 1   ? 26
-         : distKm < 2   ? 22
-         : distKm < 5   ? 16
-         : distKm < 10  ? 10
-         : distKm < 20  ? 5
-         : 2;
-
-  // Affordability (0-18)
+  let score = 30;
+  score += distKm < 0.5 ? 30 : distKm < 1 ? 26 : distKm < 2 ? 22
+         : distKm < 5 ? 16 : distKm < 10 ? 10 : distKm < 20 ? 5 : 2;
   score += minPrice <= budget ? 18 : minPrice <= budget * 1.1 ? 10 : 3;
-
-  // 3-year PSM trend (0-12)
   score += trend3Y > 20 ? 12 : trend3Y > 10 ? 8 : trend3Y > 0 ? 4 : 0;
-
-  // Liquidity (0-6)
   score += Math.min(Math.floor(txCount / 4), 6);
-
-  // Tenure (0-4)
   score += (tenure.includes("Freehold") || tenure.includes("999")) ? 4 : 1;
-
   return Math.min(Math.round(score), 99);
 }
 
-// ── HDB nearby (for "Stay" path — same flat type, within 1.5 km) ─────────────
+// ── Row types ─────────────────────────────────────────────────────────────────
+
+interface HdbRow {
+  block: string; street_name: string; town: string; flat_type: string;
+  storey_range: string; sqm: number; resale_price: number; price_per_sqm: number;
+  month: string; lease_commence_year: number; remaining_lease: number;
+  lat: number; lng: number;
+}
+
+interface PrivateRow {
+  project: string; street: string; market_segment: string; tenure: string;
+  min_price: number; max_price: number; median_psm: number; tx_count: number;
+  latest_date: string; min_sqm: number; max_sqm: number; trend_3y: number;
+  lat: number; lng: number;
+}
+
+// ── HDB nearby ────────────────────────────────────────────────────────────────
 
 export interface ScoredHdbRecord extends HdbResaleRecord {
-  score:   number;
-  distKm:  number;
+  score:  number;
+  distKm: number;
 }
 
 export async function getHdbNearby(
   lat: number,
   lng: number,
-  flatType: string,   // API format e.g. "4 ROOM"
+  flatType: string,
   budget: number,
   limit = 7,
 ): Promise<{ records: ScoredHdbRecord[]; fromDb: boolean }> {
-  const db = await connectDb();
+  const db = getDb();
   if (!db) return { records: [], fromDb: false };
 
-  const docs = await HdbTx.find({
-    location: {
-      $near: {
-        $geometry: { type: "Point", coordinates: [lng, lat] },
-        $maxDistance: NEARBY_DIST_M,
-      },
-    },
-    flatType,
-  })
-    .sort({ month: -1 })
-    .limit(150)
-    .lean();
+  const { latDelta, lngDelta } = deltaDeg(lat);
 
-  const scored: ScoredHdbRecord[] = docs.map((doc) => {
-    const [docLng, docLat] = (doc.location as { coordinates: number[] }).coordinates;
-    const distKm = Math.round(haversineKm(lat, lng, docLat, docLng) * 10) / 10;
-    return {
-      block:             doc.block ?? "",
-      streetName:        doc.streetName ?? "",
-      town:              doc.town ?? "",
-      flatType:          doc.flatType ?? "",
-      storeyRange:       doc.storeyRange ?? "",
-      sqm:               doc.sqm ?? 0,
-      resalePrice:       doc.resalePrice ?? 0,
-      pricePerSqm:       doc.pricePerSqm ?? 0,
-      month:             doc.month ?? "",
-      leaseCommenceYear: doc.leaseCommenceYear ?? 0,
-      remainingLease:    doc.remainingLease ?? 0,
-      score:             scoreHdb(doc.remainingLease ?? 0, doc.resalePrice ?? 0, doc.storeyRange ?? "", budget, distKm),
-      distKm,
-    };
-  });
+  const rows = db.prepare(`
+    SELECT * FROM hdb_tx
+    WHERE flat_type = ?
+      AND lat BETWEEN ? AND ?
+      AND lng BETWEEN ? AND ?
+    ORDER BY month DESC
+    LIMIT 500
+  `).all(flatType, lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta) as HdbRow[];
+
+  const scored: ScoredHdbRecord[] = rows
+    .map((row) => {
+      const distKm = Math.round(haversineKm(lat, lng, row.lat, row.lng) * 10) / 10;
+      if (distKm > NEARBY_DIST_KM) return null;
+      return {
+        block:             row.block,
+        streetName:        row.street_name,
+        town:              row.town,
+        flatType:          row.flat_type,
+        storeyRange:       row.storey_range,
+        sqm:               row.sqm,
+        resalePrice:       row.resale_price,
+        pricePerSqm:       row.price_per_sqm,
+        month:             row.month,
+        leaseCommenceYear: row.lease_commence_year,
+        remainingLease:    row.remaining_lease,
+        score:             scoreHdb(row.remaining_lease, row.resale_price, row.storey_range, budget, distKm),
+        distKm,
+      };
+    })
+    .filter((r): r is ScoredHdbRecord => r !== null);
 
   const top = scored.sort((a, b) => b.score - a.score).slice(0, limit);
   return { records: top, fromDb: true };
 }
 
-// ── Private projects nearby (for "Private Condo" path, within 1.5 km) ────────
+// ── Private projects nearby ───────────────────────────────────────────────────
 
 export async function getPrivateProjectsNearby(
   lat: number,
@@ -148,68 +145,44 @@ export async function getPrivateProjectsNearby(
   budget: number,
   limit = 15,
 ): Promise<{ projects: ExtendedProjectSummary[]; fromDb: boolean; count: number }> {
-  const db = await connectDb();
+  const db = getDb();
   if (!db) return { projects: [], fromDb: false, count: 0 };
 
-  // No $maxDistance — distance is a score factor, not a hard filter.
-  // This ensures freehold/999yr condos (concentrated in CCR/RCR) are included
-  // even when the user's home is in an OCR HDB block far from prime districts.
-  const docs = await PrivateProject.find({
-    location: {
-      $near: {
-        $geometry: { type: "Point", coordinates: [lng, lat] },
-      },
-    },
-  })
-    .limit(200)
-    .lean();
+  // Load all projects and score+sort in JS. Private project count is typically
+  // 500-1000 rows — small enough for full in-memory scan.
+  const rows = db.prepare("SELECT * FROM private_project").all() as PrivateRow[];
 
-  const total = docs.filter((doc) => {
-    const [docLng, docLat] = (doc.location as { coordinates: number[] }).coordinates;
-    return haversineKm(lat, lng, docLat, docLng) <= NEARBY_DIST_M / 1000;
-  }).length;
-
-  const scored: ExtendedProjectSummary[] = docs.map((doc) => {
-    const [docLng, docLat] = (doc.location as { coordinates: number[] }).coordinates;
-    const distKm = Math.round(haversineKm(lat, lng, docLat, docLng) * 10) / 10;
-    const propertyScore = scorePrivateProject(
-      doc.minPrice ?? 0,
-      doc.tenure ?? "",
-      doc.txCount ?? 0,
-      doc.trend3Y ?? 0,
-      budget,
-      distKm,
-    );
+  const scored: ExtendedProjectSummary[] = rows.map((row) => {
+    const distKm = Math.round(haversineKm(lat, lng, row.lat, row.lng) * 10) / 10;
     return {
-      project:       doc.project ?? "",
-      street:        doc.street ?? "",
-      tenure:        doc.tenure ?? "",
-      marketSegment: (doc.marketSegment ?? "OCR") as "OCR" | "RCR" | "CCR",
-      minPrice:      doc.minPrice ?? 0,
-      maxPrice:      doc.maxPrice ?? 0,
-      medianPsm:     doc.medianPsm ?? 0,
-      txCount:       doc.txCount ?? 0,
-      latestDate:    doc.latestDate ?? "",
-      minSqm:        doc.minSqm ?? 0,
-      maxSqm:        doc.maxSqm ?? 0,
-      propertyScore,
-      trend3Y:       doc.trend3Y ?? 0,
+      project:       row.project,
+      street:        row.street,
+      tenure:        row.tenure,
+      marketSegment: (row.market_segment ?? "OCR") as "OCR" | "RCR" | "CCR",
+      minPrice:      row.min_price,
+      maxPrice:      row.max_price,
+      medianPsm:     row.median_psm,
+      txCount:       row.tx_count,
+      latestDate:    row.latest_date,
+      minSqm:        row.min_sqm,
+      maxSqm:        row.max_sqm,
+      propertyScore: scorePrivateProject(row.min_price, row.tenure, row.tx_count, row.trend_3y, budget, distKm),
+      trend3Y:       row.trend_3y,
       distanceKm:    distKm,
-      projectLat:    docLat,
-      projectLng:    docLng,
+      projectLat:    row.lat,
+      projectLng:    row.lng,
     };
   });
 
+  const within1_5km = scored.filter((p) => p.distanceKm !== null && p.distanceKm <= NEARBY_DIST_KM).length;
   const top = scored.sort((a, b) => b.propertyScore - a.propertyScore).slice(0, limit);
-  return { projects: top, fromDb: true, count: total };
+  return { projects: top, fromDb: true, count: within1_5km };
 }
 
 export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number; privateCount: number }> {
-  const db = await connectDb();
+  const db = getDb();
   if (!db) return { connected: false, hdbCount: 0, privateCount: 0 };
-  const [hdbCount, privateCount] = await Promise.all([
-    HdbTx.countDocuments(),
-    PrivateProject.countDocuments(),
-  ]);
+  const hdbCount     = (db.prepare("SELECT COUNT(*) as n FROM hdb_tx").get() as { n: number }).n;
+  const privateCount = (db.prepare("SELECT COUNT(*) as n FROM private_project").get() as { n: number }).n;
   return { connected: true, hdbCount, privateCount };
 }
