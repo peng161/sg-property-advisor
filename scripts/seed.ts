@@ -1,11 +1,17 @@
 /**
- * Seed script — pulls 10 years of HDB + private transactions, geocodes unique
- * addresses via OneMap, and writes to a local SQLite database.
+ * Seed script — pulls HDB + private property data, geocodes, writes SQLite.
  *
  * Run once:  npm run seed
- * Requires:  URA_ACCESS_KEY in .env.local  (optional — skips private data without it)
  *
- * Output:  data/sg-property.db  (~50–200 MB depending on data volume)
+ * Private data sources (in priority order):
+ *   1. data/private_transactions.csv  — manual export from URA REALIS
+ *   2. data.gov.sg quarterly aggregate datasets (demand metrics only)
+ *   3. Built-in mock data (22 projects, last resort)
+ *
+ * Optional env vars:
+ *   DATA_GOV_SG_API_KEY  — higher rate limits on data.gov.sg CKAN API
+ *
+ * Output:  data/sg-property.db
  */
 
 import { config } from "dotenv";
@@ -171,6 +177,17 @@ function openDb(): Database.Database {
       lat            REAL    NOT NULL,
       lng            REAL    NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS private_demand_metrics (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      quarter      TEXT    NOT NULL,
+      region       TEXT    NOT NULL,
+      type_of_sale TEXT    NOT NULL,
+      sale_status  TEXT    NOT NULL,
+      units        INTEGER NOT NULL,
+      UNIQUE(quarter, region, type_of_sale, sale_status)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pdm_quarter ON private_demand_metrics(quarter);
   `);
   return db;
 }
@@ -225,12 +242,16 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
       `&sort=month%20desc`;
 
     type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
+    const hdbApiKey = process.env.DATA_GOV_SG_API_KEY ?? process.env.DATAGOV_API_KEY ?? "";
+    const hdbHeaders: Record<string, string> = { Accept: "application/json" };
+    if (hdbApiKey) hdbHeaders["x-api-key"] = hdbApiKey;
+
     // 429-aware fetch with up to HDB_MAX_RETRIES attempts
     let json: HdbPage | null = null;
     for (let attempt = 1; attempt <= HDB_MAX_RETRIES; attempt++) {
       const res = await fetch(url, {
         signal:  AbortSignal.timeout(30000),
-        headers: { Accept: "application/json" },
+        headers: hdbHeaders,
       });
 
       if (res.status === 429) {
@@ -288,7 +309,8 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
 
     offset += HDB_BATCH_SIZE;
     page++;
-    await sleep(2700);  // data.gov.sg CKAN v1 limit: 4 calls/10s → need ≥2500ms
+    // With DATA_GOV_SG_API_KEY (Production): 20 calls/10s → 600ms safe. Without: 4/10s → 2700ms.
+    await sleep(hdbApiKey ? 600 : 2700);
   }
 
   if (page > HDB_MAX_PAGES) {
@@ -298,7 +320,7 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
   return all;
 }
 
-// ── Private transaction fetching (URA) ────────────────────────────────────────
+// ── Private data sources ──────────────────────────────────────────────────────
 
 interface PrivateTx {
   project: string; street: string; district: string;
@@ -306,92 +328,130 @@ interface PrivateTx {
   price: number; sqm: number; pricePerSqm: number; contractDate: string;
 }
 
-async function fetchPrivateTxs(): Promise<PrivateTx[]> {
-  const accessKey = process.env.URA_ACCESS_KEY;
-  if (!accessKey) {
-    console.log("  No URA_ACCESS_KEY — using built-in mock transactions (22 projects).");
-    console.log("  For live data: https://eservice.ura.gov.sg/uraDataService/");
-    return PRIVATE_MOCK_TRANSACTIONS.map((t) => ({
-      project:       t.project,
-      street:        t.street,
-      district:      t.district,
-      marketSegment: t.marketSegment,
-      tenure:        t.tenure,
-      price:         t.price,
-      sqm:           t.sqm,
-      pricePerSqm:   t.pricePerSqm,
-      contractDate:  t.contractDate,
-    }));
-  }
+// data.gov.sg CKAN dataset IDs for private residential property transactions.
+// Fields: quarter (YYYY-QN), type_of_sale, sale_status, units
+// These provide quarterly aggregate demand metrics (not project-level transactions).
+//
+// To find IDs for missing regions: open data.gov.sg, search "private residential
+// property transactions quarterly", filter by URA. The URL contains the resource_id.
+const DATAGOV_DEMAND_DATASETS: { region: string; resourceId: string }[] = [
+  { region: "OCR", resourceId: "d_1a7823f3d31e7db4b426833833762bab" },
+  // Add CCR, RCR, and "ALL" (Whole of Singapore) IDs once discovered:
+  // { region: "CCR", resourceId: "d_..." },
+  // { region: "RCR", resourceId: "d_..." },
+  // { region: "ALL", resourceId: "d_..." },
+];
 
-  try {
-    const tokenRes  = await fetch(
-      "https://eservice.ura.gov.sg/uraDataService/insertNewToken.action?service=PMI_Resi_Transaction",
-      { headers: { AccessKey: accessKey } }
-    );
-    const tokenJson = await tokenRes.json() as { Status: string; Result: string };
-    if (tokenJson.Status !== "Success") throw new Error("URA token failed");
-    const token = tokenJson.Result;
-
-    const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
-    const all: PrivateTx[] = [];
-    const cutoffYear = CURRENT_YEAR - 10;
-
-    let consecutive = 0;
-    for (let batch = 1; batch <= 20; batch++) {
-      process.stdout.write(`  Fetching URA batch ${batch}... `);
-      try {
-        const res = await fetch(
-          `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${batch}`,
-          { headers: { AccessKey: accessKey, Token: token }, signal: AbortSignal.timeout(30000) }
-        );
-        const json = await res.json() as {
-          Status: string;
-          Result: { project: string; street: string; district: string; marketSegment: string; propertyType: string; tenure: string; price: string; area: string; contractDate: string }[]
-        };
-        if (json.Status !== "Success" || !Array.isArray(json.Result)) {
-          console.log("no data");
-          if (++consecutive >= 2) break;
-          continue;
-        }
-        consecutive = 0;
-
-        let count = 0;
-        for (const raw of json.Result) {
-          if (!condoTypes.has(raw.propertyType)) continue;
-          const price = Number(raw.price);
-          const sqm   = Number(raw.area);
-          if (!price || !sqm) continue;
-          const yy   = raw.contractDate.slice(0, 2);
-          const mm   = raw.contractDate.slice(2, 4);
-          const year = Number(yy) < 50 ? `20${yy}` : `19${yy}`;
-          if (Number(year) < cutoffYear) continue;
-          const seg = (raw.marketSegment ?? "OCR").toUpperCase();
-          all.push({
-            project:       raw.project,
-            street:        raw.street,
-            district:      raw.district,
-            marketSegment: seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR",
-            tenure:        parseTenure(raw.tenure),
-            price,
-            sqm,
-            pricePerSqm:   Math.round(price / sqm),
-            contractDate:  `${year}-${mm}`,
-          });
-          count++;
-        }
-        console.log(`${count} txs (${json.Result.length} raw)`);
-        await sleep(600);
-      } catch (e) {
-        console.log(`failed: ${e}`);
-        if (++consecutive >= 2) break;
-      }
+// Fetch with retry on 429
+async function fetchCkan<T>(url: string, headers: Record<string, string>): Promise<T | null> {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
+    if (res.status === 429) {
+      const wait = Math.min(3000 * 2 ** (attempt - 1), 30000);
+      console.log(`    429 — backoff ${wait / 1000}s (attempt ${attempt}/5)…`);
+      await sleep(wait);
+      continue;
     }
-    return all;
-  } catch (e) {
-    console.error("  URA fetch error:", e);
-    return [];
+    if (!res.ok) { console.log(`    HTTP ${res.status}`); return null; }
+    return res.json() as Promise<T>;
   }
+  return null;
+}
+
+interface DemandRow { quarter: string; type_of_sale: string; sale_status: string; units: string }
+
+async function fetchPrivateDemandMetrics(): Promise<
+  { quarter: string; region: string; type_of_sale: string; sale_status: string; units: number }[]
+> {
+  const apiKey = process.env.DATA_GOV_SG_API_KEY ?? process.env.DATAGOV_API_KEY ?? "";
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) headers["x-api-key"] = apiKey;
+
+  // Only last 12 months (~5 recent quarters)
+  const cutoffYear = CURRENT_YEAR - 1;
+  const cutoffQ    = `${cutoffYear}-Q${Math.ceil((new Date().getMonth() + 1) / 3)}`;
+
+  const all: { quarter: string; region: string; type_of_sale: string; sale_status: string; units: number }[] = [];
+
+  for (const { region, resourceId } of DATAGOV_DEMAND_DATASETS) {
+    process.stdout.write(`  Fetching demand metrics [${region}]… `);
+    let offset = 0;
+    let fetched = 0;
+
+    while (true) {
+      const url = `https://data.gov.sg/api/action/datastore_search?resource_id=${resourceId}&limit=100&offset=${offset}&sort=quarter+desc`;
+      type CkanResp = { success: boolean; result?: { records: DemandRow[]; total: number } };
+      const data = await fetchCkan<CkanResp>(url, headers);
+      if (!data?.success || !data.result) break;
+
+      const rows = data.result.records;
+      let stop = false;
+      for (const row of rows) {
+        if (row.quarter < cutoffQ) { stop = true; continue; }
+        all.push({
+          quarter:      row.quarter,
+          region,
+          type_of_sale: row.type_of_sale,
+          sale_status:  row.sale_status,
+          units:        Number(row.units) || 0,
+        });
+        fetched++;
+      }
+      if (stop || offset + rows.length >= data.result.total) break;
+      offset += 100;
+      await sleep(apiKey ? 600 : 2700);
+    }
+    console.log(`${fetched} rows`);
+  }
+  return all;
+}
+
+// CSV import — reads data/private_transactions.csv if present.
+// Expected columns (any order, case-insensitive headers):
+//   project, street, district, market_segment, tenure, price, sqm, contract_date
+function loadPrivateCsv(): PrivateTx[] {
+  const csvPath = path.join(process.cwd(), "data", "private_transactions.csv");
+  if (!fs.existsSync(csvPath)) return [];
+
+  const lines = fs.readFileSync(csvPath, "utf8").split("\n").filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/\s+/g, "_"));
+  const col = (name: string) => headers.indexOf(name);
+
+  const results: PrivateTx[] = [];
+  for (const line of lines.slice(1)) {
+    const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    const price = Number(cells[col("price")] ?? cells[col("transacted_price")] ?? 0);
+    const sqm   = Number(cells[col("sqm")] ?? cells[col("area")] ?? 0);
+    if (!price || !sqm) continue;
+    const seg = (cells[col("market_segment")] ?? "OCR").toUpperCase();
+    results.push({
+      project:       cells[col("project")] ?? "",
+      street:        cells[col("street")] ?? "",
+      district:      cells[col("district")] ?? "",
+      marketSegment: seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR",
+      tenure:        parseTenure(cells[col("tenure")] ?? ""),
+      price,
+      sqm,
+      pricePerSqm:   Math.round(price / sqm),
+      contractDate:  cells[col("contract_date")] ?? cells[col("sale_date")] ?? "",
+    });
+  }
+  console.log(`  Loaded ${results.length} rows from private_transactions.csv`);
+  return results;
+}
+
+function getPrivateTxs(): PrivateTx[] {
+  const csv = loadPrivateCsv();
+  if (csv.length > 0) return csv;
+  console.log("  No private_transactions.csv — using built-in mock data (22 projects).");
+  console.log("  To seed real data: export from URA REALIS and save to data/private_transactions.csv");
+  return PRIVATE_MOCK_TRANSACTIONS.map((t) => ({
+    project: t.project, street: t.street, district: t.district,
+    marketSegment: t.marketSegment, tenure: t.tenure,
+    price: t.price, sqm: t.sqm, pricePerSqm: t.pricePerSqm, contractDate: t.contractDate,
+  }));
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -450,10 +510,29 @@ async function main() {
   const hdbOk = insertManyHdb(allHdb);
   console.log(`  Done: ${hdbOk} rows written\n`);
 
-  // ── Private ────────────────────────────────────────────────────────────────
+  // ── Private demand metrics (data.gov.sg quarterly aggregates) ────────────
 
-  console.log("Fetching private transactions from URA...");
-  const privateTxs = await fetchPrivateTxs();
+  console.log("Fetching private demand metrics from data.gov.sg…");
+  const demandMetrics = await fetchPrivateDemandMetrics();
+  console.log(`Total demand metric rows: ${demandMetrics.length}\n`);
+
+  if (demandMetrics.length > 0) {
+    const insertDemand = db.prepare(`
+      INSERT OR REPLACE INTO private_demand_metrics
+        (quarter, region, type_of_sale, sale_status, units)
+      VALUES (?,?,?,?,?)
+    `);
+    const insertManyDemand = db.transaction(
+      (rows: typeof demandMetrics) => { for (const r of rows) insertDemand.run(r.quarter, r.region, r.type_of_sale, r.sale_status, r.units); }
+    );
+    insertManyDemand(demandMetrics);
+    console.log(`  Done: ${demandMetrics.length} demand rows written\n`);
+  }
+
+  // ── Private projects (CSV → mock fallback) ────────────────────────────────
+
+  console.log("Loading private transactions…");
+  const privateTxs = getPrivateTxs();
   console.log(`Total private transactions: ${privateTxs.length}\n`);
 
   if (privateTxs.length > 0) {

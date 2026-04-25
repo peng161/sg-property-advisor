@@ -1,5 +1,6 @@
-// Fetches private property transactions from URA API (if URA_ACCESS_KEY is set)
-// or falls back to built-in mock data.
+// Private property transaction types and mock data.
+// Real project-level data is seeded from data/private_transactions.csv (see seed script).
+// Quarterly aggregate demand metrics come from data.gov.sg CKAN datasets (see seed script).
 
 export interface PrivateTransaction {
   project: string;
@@ -15,31 +16,6 @@ export interface PrivateTransaction {
   floorRange: string;
   contractDate: string; // "YYYY-MM"
 }
-
-// URA API raw shape
-interface UraRaw {
-  project:       string;
-  street:        string;
-  district:      string;
-  marketSegment: string;
-  propertyType:  string;
-  tenure:        string;
-  typeOfSale:    string;
-  price:         string;
-  area:          string;
-  floorRange:    string;
-  contractDate:  string; // "YYMM" e.g. "2401" = Jan 2024
-  noOfUnits:     string;
-}
-
-// "2401" → "2024-01"
-function parseDate(raw: string): string {
-  const yy = raw.slice(0, 2);
-  const mm = raw.slice(2, 4);
-  const year = Number(yy) < 50 ? `20${yy}` : `19${yy}`;
-  return `${year}-${mm}`;
-}
-
 // Simplify tenure string
 function parseTenure(raw: string): string {
   if (!raw) return "Unknown";
@@ -51,71 +27,6 @@ function parseTenure(raw: string): string {
   return raw.slice(0, 40);
 }
 
-async function getUraToken(accessKey: string): Promise<string> {
-  const res = await fetch(
-    "https://eservice.ura.gov.sg/uraDataService/insertNewToken.action?service=PMI_Resi_Transaction",
-    { headers: { AccessKey: accessKey }, cache: "no-store" }
-  );
-  const json = await res.json();
-  if (json.Status !== "Success") throw new Error(`URA token: ${json.Status}`);
-  return json.Result as string;
-}
-
-async function fetchFromUra(accessKey: string): Promise<PrivateTransaction[]> {
-  const token = await getUraToken(accessKey);
-
-  const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
-  const all: PrivateTransaction[] = [];
-  const cutoff = new Date().getFullYear() - 10;
-
-  // Fetch batches sequentially — URA token is session-scoped; parallel calls can collide.
-  // Each batch covers ~1 quarter; try up to 20 batches (~5 years), stop on 2 consecutive failures.
-  let consecutive = 0;
-  for (let b = 1; b <= 20; b++) {
-    try {
-      const res = await fetch(
-        `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${b}`,
-        { headers: { AccessKey: accessKey, Token: token }, next: { revalidate: 86400 } }
-      );
-      const json = await res.json() as { Status: string; Result: UraRaw[] };
-      if (json.Status !== "Success" || !Array.isArray(json.Result)) {
-        if (++consecutive >= 2) break;
-        continue;
-      }
-      consecutive = 0;
-
-      for (const raw of json.Result) {
-        if (!condoTypes.has(raw.propertyType)) continue;
-        const price = Number(raw.price);
-        const sqm   = Number(raw.area);
-        if (!price || !sqm) continue;
-
-        const date = parseDate(raw.contractDate);
-        if (Number(date.slice(0, 4)) < cutoff) continue;
-
-        const seg = (raw.marketSegment ?? "OCR").toUpperCase();
-        all.push({
-          project:       raw.project ?? "Unknown",
-          street:        raw.street ?? "",
-          district:      raw.district ?? "",
-          marketSegment: seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR",
-          propertyType:  raw.propertyType,
-          tenure:        parseTenure(raw.tenure),
-          typeOfSale:    raw.typeOfSale ?? "",
-          price,
-          sqm,
-          pricePerSqm:   Math.round(price / sqm),
-          floorRange:    raw.floorRange ?? "",
-          contractDate:  date,
-        });
-      }
-    } catch {
-      if (++consecutive >= 2) break;
-    }
-  }
-
-  return all.sort((a, b) => b.contractDate.localeCompare(a.contractDate));
-}
 
 // --- Mock data fallback ---
 // Realistic Singapore private condo transactions spanning 2022–2024
@@ -180,13 +91,7 @@ const MOCK_CLEAN: PrivateTransaction[] = MOCK.map((t) => ({
 
 export { MOCK_CLEAN as PRIVATE_MOCK_TRANSACTIONS };
 
+// Returns mock data. Real project-level data comes from CSV import in the seed script.
 export async function fetchPrivateTransactions(): Promise<PrivateTransaction[]> {
-  const accessKey = process.env.URA_ACCESS_KEY;
-  if (!accessKey) return MOCK_CLEAN;
-
-  try {
-    return await fetchFromUra(accessKey);
-  } catch {
-    return MOCK_CLEAN;
-  }
+  return MOCK_CLEAN;
 }

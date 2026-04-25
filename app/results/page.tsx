@@ -15,7 +15,6 @@ import {
   dbStatus,
 } from "@/lib/dbQueries";
 import { isDbReady } from "@/lib/sqlite";
-import { isMongoConfigured } from "@/lib/mongodb"; // kept for private listings gate
 import { getUserFinancialProfile } from "@/lib/financialProfile";
 import { isMyinfoConfigured } from "@/lib/myinfo/config";
 
@@ -226,7 +225,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   let dbUsed = false;
   let dbProjectCount = 0;
 
-  if (hasUserCoords && isMongoConfigured()) {
+  if (hasUserCoords && isDbReady()) {
     const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 30);
     if (fromDb && projects.length > 0) {
       privateListings = projects;

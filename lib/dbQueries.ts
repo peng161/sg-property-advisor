@@ -209,6 +209,48 @@ export async function getHdbByTown(
   }
 }
 
+// ── Private demand metrics ────────────────────────────────────────────────────
+
+export interface PrivateDemandMetric {
+  quarter:      string;
+  region:       string;
+  type_of_sale: string;
+  sale_status:  string;
+  units:        number;
+}
+
+export async function getPrivateDemandMetrics(
+  region?: string, quarters = 5,
+): Promise<PrivateDemandMetric[]> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const recentQuarters = await db.execute(
+      "SELECT DISTINCT quarter FROM private_demand_metrics ORDER BY quarter DESC LIMIT ?",
+      [quarters],
+    );
+    if (!recentQuarters.rows.length) return [];
+    const qList = recentQuarters.rows.map((r) => s(r.quarter));
+    const placeholders = qList.map(() => "?").join(",");
+    const args = region
+      ? [...qList, region]
+      : qList;
+    const sql = region
+      ? `SELECT * FROM private_demand_metrics WHERE quarter IN (${placeholders}) AND region = ? ORDER BY quarter DESC`
+      : `SELECT * FROM private_demand_metrics WHERE quarter IN (${placeholders}) ORDER BY quarter DESC`;
+    const result = await db.execute({ sql, args });
+    return result.rows.map((r) => ({
+      quarter:      s(r.quarter),
+      region:       s(r.region),
+      type_of_sale: s(r.type_of_sale),
+      sale_status:  s(r.sale_status),
+      units:        n(r.units),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number; privateCount: number }> {
   const db = getDb();
   if (!db) return { connected: false, hdbCount: 0, privateCount: 0 };
