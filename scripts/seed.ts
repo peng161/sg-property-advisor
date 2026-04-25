@@ -14,6 +14,7 @@ config({ path: ".env.local" });
 import path from "path";
 import fs from "fs";
 import Database from "better-sqlite3";
+import { PRIVATE_MOCK_TRANSACTIONS } from "../lib/fetchPrivateTransactions";
 
 // ── constants ────────────────────────────────────────────────────────────────
 
@@ -308,9 +309,19 @@ interface PrivateTx {
 async function fetchPrivateTxs(): Promise<PrivateTx[]> {
   const accessKey = process.env.URA_ACCESS_KEY;
   if (!accessKey) {
-    console.log("  No URA_ACCESS_KEY — skipping private data");
-    console.log("  Get a free key at: https://eservice.ura.gov.sg/uraDataService/");
-    return [];
+    console.log("  No URA_ACCESS_KEY — using built-in mock transactions (22 projects).");
+    console.log("  For live data: https://eservice.ura.gov.sg/uraDataService/");
+    return PRIVATE_MOCK_TRANSACTIONS.map((t) => ({
+      project:       t.project,
+      street:        t.street,
+      district:      t.district,
+      marketSegment: t.marketSegment,
+      tenure:        t.tenure,
+      price:         t.price,
+      sqm:           t.sqm,
+      pricePerSqm:   t.pricePerSqm,
+      contractDate:  t.contractDate,
+    }));
   }
 
   try {

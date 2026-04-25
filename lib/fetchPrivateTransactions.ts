@@ -178,6 +178,8 @@ const MOCK_CLEAN: PrivateTransaction[] = MOCK.map((t) => ({
   pricePerSqm: Math.round(t.price / t.sqm),
 }));
 
+export { MOCK_CLEAN as PRIVATE_MOCK_TRANSACTIONS };
+
 export async function fetchPrivateTransactions(): Promise<PrivateTransaction[]> {
   const accessKey = process.env.URA_ACCESS_KEY;
   if (!accessKey) return MOCK_CLEAN;
