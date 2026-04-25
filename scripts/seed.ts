@@ -177,8 +177,8 @@ function openDb(): Database.Database {
 // ── HDB fetching ──────────────────────────────────────────────────────────────
 
 const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
-const HDB_BATCH_SIZE  = 100;
-const HDB_MAX_PAGES   = 200;
+const HDB_BATCH_SIZE  = 10_000;   // CKAN supports up to ~32 000; 10 K is safe and fast
+const HDB_MAX_PAGES   = 50;       // 50 × 10 000 = 500 000 — well above 5 yr volume
 const HDB_MAX_RETRIES = 5;
 
 interface RawHdb { [key: string]: string }
@@ -215,11 +215,13 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
   let total   = Infinity; // updated from first response
 
   while (page <= HDB_MAX_PAGES) {
+    // Sort newest-first so we can bail as soon as records fall before START_YEAR.
     const url =
       `https://data.gov.sg/api/action/datastore_search` +
       `?resource_id=${HDB_RESOURCE_ID}` +
       `&limit=${HDB_BATCH_SIZE}` +
-      `&offset=${offset}`;
+      `&offset=${offset}` +
+      `&sort=month%20desc`;
 
     type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
     // 429-aware fetch with up to HDB_MAX_RETRIES attempts
@@ -265,22 +267,27 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
       break;
     }
 
-    // Filter to desired year window in JS
-    const inRange = batch.filter((r) => {
+    // Keep only records within the date window; bail once all are older.
+    let passedWindow = false;
+    for (const r of batch) {
       const y = parseInt((r.month ?? "0000").slice(0, 4), 10);
-      return y >= START_YEAR && y <= CURRENT_YEAR;
-    });
-    all.push(...inRange);
+      if (y < START_YEAR) { passedWindow = true; continue; }
+      if (y <= CURRENT_YEAR) all.push(r);
+    }
 
-    // Stop if we've consumed all available records
+    if (passedWindow) {
+      console.log("  Reached start of date window — stopping early.");
+      break;
+    }
+
     if (offset + batch.length >= total) {
-      console.log("  Reached end of dataset (offset + fetched >= total).");
+      console.log("  Reached end of dataset.");
       break;
     }
 
     offset += HDB_BATCH_SIZE;
     page++;
-    await sleep(1500);
+    await sleep(300);   // polite but fast (was 1 500 ms)
   }
 
   if (page > HDB_MAX_PAGES) {
@@ -388,11 +395,14 @@ async function main() {
   const allHdb = await fetchAllHdb();
   console.log(`\nTotal HDB records in range: ${allHdb.length}\n`);
 
-  const uniqueHdbAddr = [...new Set(allHdb.map((r) => `BLK ${r.block} ${r.street_name}`))];
-  console.log(`Geocoding ${uniqueHdbAddr.length} unique HDB addresses...`);
-  const hdbGeo = await geocodeBulk(uniqueHdbAddr);
+  // Geocode by unique street name — all blocks on the same street share one lookup.
+  // Reduces queries from ~6 500 (block-level) to ~1 000–1 500 (street-level), still
+  // precise enough for the 2 km bounding-box proximity queries in the app.
+  const uniqueStreets = [...new Set(allHdb.map((r) => r.street_name as string))];
+  console.log(`Geocoding ${uniqueStreets.length} unique HDB streets (was ~${allHdb.length > 0 ? new Set(allHdb.map((r) => `${r.block} ${r.street_name}`)).size : 0} block-level)...`);
+  const hdbGeo = await geocodeBulk(uniqueStreets, 8, 200);   // concurrency 8, 200 ms delay
   const geocoded = [...hdbGeo.values()].filter(Boolean).length;
-  console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueHdbAddr.length - geocoded}\n`);
+  console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueStreets.length - geocoded}\n`);
 
   console.log("Writing HDB transactions to SQLite...");
   const insertHdb = db.prepare(`
@@ -405,10 +415,7 @@ async function main() {
   const insertManyHdb = db.transaction((rows: RawHdb[]) => {
     let ok = 0;
     for (const row of rows) {
-      const key    = `BLK ${row.block} ${row.street_name}`;
-      // Prefer precise geocoded coordinate; fall back to town centroid so we
-      // never skip a record purely due to OneMap rate-limiting.
-      const precise = hdbGeo.get(key);
+      const precise = hdbGeo.get(row.street_name as string);
       const town    = (row.town ?? "").toUpperCase().trim();
       const fallback = TOWN_COORDS[town] ?? null;
       const coords  = precise ?? fallback;
