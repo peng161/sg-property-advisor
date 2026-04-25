@@ -1,28 +1,33 @@
+import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
-import Database from "better-sqlite3";
 
-export const DB_PATH = path.join(process.cwd(), "data", "sg-property.db");
+const LOCAL_DB_PATH = path.join(process.cwd(), "data", "sg-property.db");
 
-// Singleton read-only connection for the Next.js app runtime
-let _db: Database.Database | null = null;
+let _client: Client | null = null;
 
-export function getDb(): Database.Database | null {
-  if (!fs.existsSync(DB_PATH)) return null;
-  if (!_db) {
-    _db = new Database(DB_PATH, { readonly: true });
+export function getDb(): Client | null {
+  if (_client) return _client;
+
+  if (process.env.TURSO_URL) {
+    _client = createClient({
+      url:       process.env.TURSO_URL,
+      authToken: process.env.TURSO_AUTH_TOKEN ?? "",
+    });
+    return _client;
   }
-  return _db;
+
+  if (fs.existsSync(LOCAL_DB_PATH)) {
+    _client = createClient({ url: `file:${LOCAL_DB_PATH}` });
+    return _client;
+  }
+
+  return null;
 }
 
+// Synchronous check — just tests whether credentials / local file are present.
+// Actual data presence is validated lazily when queries run.
 export function isDbReady(): boolean {
-  if (!fs.existsSync(DB_PATH)) return false;
-  try {
-    const db = getDb();
-    if (!db) return false;
-    const row = db.prepare("SELECT COUNT(*) as n FROM private_project").get() as { n: number };
-    return row.n > 0;
-  } catch {
-    return false;
-  }
+  if (process.env.TURSO_URL) return true;
+  return fs.existsSync(LOCAL_DB_PATH);
 }
