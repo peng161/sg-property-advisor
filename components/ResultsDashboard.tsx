@@ -37,18 +37,18 @@ export interface EcSummary {
 }
 
 export interface DebugInfo {
-  postalCode:              string;
-  lat:                     number;
-  lng:                     number;
-  leaseCommencementYear:   number;
-  leaseKnown:              boolean;
-  remainingLease:          number;
-  hdbTxCount:              number;
-  privateProjectCount:     number;
-  dbProjectsWithin1_5km:  number;
-  dataSource:              string;
-  hdbDataSource:           string;
-  mongoConfigured:         boolean;
+  postalCode:             string;
+  lat:                    number;
+  lng:                    number;
+  leaseCommencementYear:  number;
+  leaseKnown:             boolean;
+  remainingLease:         number;
+  hdbTxCount:             number;
+  privateProjectCount:    number;
+  dbProjectsWithin1_5km: number;
+  privateSource:          string;
+  hdbSource:              string;
+  dbReady:                boolean;
 }
 
 export interface DashboardProps {
@@ -924,10 +924,10 @@ export default function ResultsDashboard({
                   ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "95 yrs (defaulted)"],
                   ["HDB Txns Fetched", `${debugInfo.hdbTxCount}`],
                   ["Private Projects", `${debugInfo.privateProjectCount}`],
-                  ["Within 1.5 km (DB)", debugInfo.mongoConfigured ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A (no DB)"],
-                  ["Private Source", debugInfo.dataSource],
-                  ["HDB Source", debugInfo.hdbDataSource],
-                  ["MongoDB", debugInfo.mongoConfigured ? "Configured" : "Not configured"],
+                  ["Within 1.5 km", debugInfo.dbReady ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A (seed DB first)"],
+                  ["Private Source", debugInfo.privateSource],
+                  ["HDB Source", debugInfo.hdbSource],
+                  ["SQLite DB", debugInfo.dbReady ? "Ready" : "Not seeded — run npm run seed"],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-1 leading-tight">
                     <span className="text-slate-400 shrink-0">{k}</span>

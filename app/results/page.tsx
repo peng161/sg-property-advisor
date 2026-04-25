@@ -349,9 +349,9 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     hdbTxCount: hdbTx.length,
     privateProjectCount: privateListings.length,
     dbProjectsWithin1_5km: dbProjectCount,
-    dataSource: dbUsed ? "MongoDB (1.5 km radius)" : "API (district centroid)",
-    hdbDataSource: hdbFromDb ? "MongoDB (1.5 km radius)" : "API (town filter)",
-    mongoConfigured: isMongoConfigured(),
+    privateSource: dbUsed ? "SQLite (1.5 km radius)" : "API (district centroid)",
+    hdbSource: hdbFromDb ? "SQLite (1.5 km radius)" : "API (town filter)",
+    dbReady: isMongoConfigured(),
   };
 
   return (
