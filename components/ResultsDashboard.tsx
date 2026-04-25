@@ -7,6 +7,7 @@ import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
 import type { FinancialProfile } from "@/lib/myinfo/types";
 import FinancialProfilePanel from "./FinancialProfilePanel";
+import UpgradeScorePanel from "./UpgradeScorePanel";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
 
@@ -1190,6 +1191,26 @@ export default function ResultsDashboard({
               />
             </div>
           </div>
+
+          {/* ── Section 3: Upgrade Suitability Score ── */}
+          <section>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">3</div>
+              <div>
+                <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Upgrade Suitability Score</h2>
+                <p className="text-xs text-slate-400">Should you upgrade now, wait, or improve your position first?</p>
+              </div>
+            </div>
+            <UpgradeScorePanel
+              assessment={assessment}
+              flatType={flatType}
+              remainingLease={remainingLease}
+              numChildren={numChildren}
+              remainingLoan={remainingLoan}
+              purchasePrice={purchasePrice}
+              financialProfile={initialFinancialProfile}
+            />
+          </section>
 
           {/* Footer */}
           <div className="flex justify-between text-[9px] text-slate-400 pt-2 border-t border-slate-200 pb-6">
