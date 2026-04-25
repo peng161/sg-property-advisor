@@ -19,7 +19,7 @@ import Database from "better-sqlite3";
 
 const DB_PATH      = path.join(process.cwd(), "data", "sg-property.db");
 const CURRENT_YEAR = new Date().getFullYear();
-const START_YEAR   = CURRENT_YEAR - 10;
+const START_YEAR   = CURRENT_YEAR - 5;
 
 const DISTRICT_CENTROIDS: Record<string, [number, number]> = {
   "01": [1.2810, 103.8508], "02": [1.2760, 103.8423], "03": [1.2894, 103.8083],
@@ -69,6 +69,26 @@ function calcTrend(dates: string[], psms: number[]): number {
 
 // ── geocoding ─────────────────────────────────────────────────────────────────
 
+// Town-level fallback coordinates — used when OneMap can't find a specific block.
+// Gives every HDB record a coordinate so proximity search works even without
+// precise geocoding. Precision is town-centroid (~500m–2km from real location).
+const TOWN_COORDS: Record<string, [number, number]> = {
+  "ANG MO KIO":      [1.3691, 103.8454], "BEDOK":           [1.3236, 103.9273],
+  "BISHAN":          [1.3526, 103.8352], "BUKIT BATOK":     [1.3490, 103.7490],
+  "BUKIT MERAH":     [1.2819, 103.8239], "BUKIT PANJANG":   [1.3774, 103.7719],
+  "BUKIT TIMAH":     [1.3294, 103.7885], "CENTRAL AREA":    [1.2980, 103.8480],
+  "CHOA CHU KANG":   [1.3840, 103.7470], "CLEMENTI":        [1.3162, 103.7649],
+  "GEYLANG":         [1.3201, 103.8880], "HOUGANG":         [1.3612, 103.8863],
+  "JURONG EAST":     [1.3330, 103.7436], "JURONG WEST":     [1.3404, 103.7090],
+  "KALLANG/WHAMPOA": [1.3099, 103.8677], "MARINE PARADE":   [1.3010, 103.9060],
+  "PASIR RIS":       [1.3721, 103.9474], "PUNGGOL":         [1.4043, 103.9021],
+  "QUEENSTOWN":      [1.2942, 103.7861], "SEMBAWANG":       [1.4490, 103.8185],
+  "SENGKANG":        [1.3868, 103.8914], "SERANGOON":       [1.3554, 103.8679],
+  "TAMPINES":        [1.3540, 103.9440], "TOA PAYOH":       [1.3321, 103.8474],
+  "WOODLANDS":       [1.4369, 103.7864], "YISHUN":          [1.4304, 103.8354],
+  "LIM CHU KANG":    [1.4196, 103.7184], "TENGAH":          [1.3740, 103.7350],
+};
+
 const geoCache = new Map<string, [number, number] | null>();
 
 async function geocodeOneMap(query: string): Promise<[number, number] | null> {
@@ -90,7 +110,7 @@ async function geocodeOneMap(query: string): Promise<[number, number] | null> {
   }
 }
 
-async function geocodeBulk(queries: string[], concurrency = 8, delayMs = 150) {
+async function geocodeBulk(queries: string[], concurrency = 4, delayMs = 400) {
   const out = new Map<string, [number, number] | null>();
   for (let i = 0; i < queries.length; i += concurrency) {
     const batch   = queries.slice(i, i + concurrency);
@@ -364,7 +384,7 @@ async function main() {
 
   // ── HDB ────────────────────────────────────────────────────────────────────
 
-  console.log(`Fetching HDB resale data (${START_YEAR}–${CURRENT_YEAR}) via datastore_search…`);
+  console.log(`Fetching HDB resale data (last 5 years: ${START_YEAR}–${CURRENT_YEAR}) via datastore_search…`);
   const allHdb = await fetchAllHdb();
   console.log(`\nTotal HDB records in range: ${allHdb.length}\n`);
 
@@ -386,7 +406,12 @@ async function main() {
     let ok = 0;
     for (const row of rows) {
       const key    = `BLK ${row.block} ${row.street_name}`;
-      const coords = hdbGeo.get(key);
+      // Prefer precise geocoded coordinate; fall back to town centroid so we
+      // never skip a record purely due to OneMap rate-limiting.
+      const precise = hdbGeo.get(key);
+      const town    = (row.town ?? "").toUpperCase().trim();
+      const fallback = TOWN_COORDS[town] ?? null;
+      const coords  = precise ?? fallback;
       if (!coords) continue;
       const price = Number(row.resale_price);
       const sqm   = Number(row.floor_area_sqm);

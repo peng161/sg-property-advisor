@@ -13,6 +13,8 @@ import {
   haversineKm,
 } from "@/lib/dbQueries";
 import { isMongoConfigured } from "@/lib/mongodb";
+import { getUserFinancialProfile } from "@/lib/financialProfile";
+import { isMyinfoConfigured } from "@/lib/myinfo/config";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -149,6 +151,14 @@ export default async function ResultsPage({ searchParams }: PageProps) {
 
   const userLeaseCommencementYear = Number(params.leaseCommencementYear ?? params.leaseYear ?? 0);
   const currentYear = new Date().getFullYear();
+
+  // ── Financial profile (Myinfo session or null) ────────────────────────────
+  const [financialProfile] = await Promise.all([getUserFinancialProfile()]);
+  const myinfoAvailable = isMyinfoConfigured();
+
+  // Build a stable return URL so Singpass redirects back to this exact results page
+  const returnUrlParams = new URLSearchParams(params as Record<string, string>).toString();
+  const resultsReturnUrl = `/results${returnUrlParams ? `?${returnUrlParams}` : ""}`;
 
   const [hdb, privatePrices, hdbTx] = await Promise.all([
     fetchHdbPrices(town),
@@ -380,6 +390,9 @@ export default async function ResultsPage({ searchParams }: PageProps) {
       nextFlatType={nextFlatType}
       sameTypeHdbListings={sameTypeHdbListings}
       debugInfo={debugInfo}
+      initialFinancialProfile={financialProfile}
+      myinfoAvailable={myinfoAvailable}
+      resultsReturnUrl={resultsReturnUrl}
     />
   );
 }

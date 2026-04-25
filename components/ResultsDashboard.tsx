@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
+import type { FinancialProfile } from "@/lib/myinfo/types";
+import FinancialProfilePanel from "./FinancialProfilePanel";
 
 const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
 
@@ -76,6 +78,10 @@ export interface DashboardProps {
   nextFlatType:            string | null;
   sameTypeHdbListings:     HdbResaleRecord[];
   debugInfo:               DebugInfo;
+  // Financial profile (from Myinfo session or null)
+  initialFinancialProfile: FinancialProfile | null;
+  myinfoAvailable:         boolean;
+  resultsReturnUrl:        string;
 }
 
 // ── Bedroom helpers ───────────────────────────────────────────────────────────
@@ -589,7 +595,7 @@ export default function ResultsDashboard({
   displayAddress, postalCode, numChildren, lat, lng,
   flatType, town, purchaseYear, purchasePrice, remainingLoan, sellingFirst,
   privateListings, ecListings, biggerHdbListings, nextFlatType, sameTypeHdbListings,
-  debugInfo,
+  debugInfo, initialFinancialProfile, myinfoAvailable, resultsReturnUrl,
 }: DashboardProps) {
   // Filter state
   const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
@@ -776,6 +782,15 @@ export default function ResultsDashboard({
               </div>
             </div>
 
+            {/* Financial Profile in mobile drawer */}
+            <FinancialProfilePanel
+              initialProfile={initialFinancialProfile}
+              myinfoAvailable={myinfoAvailable}
+              currentMarketValue={assessment.currentMarketValue}
+              purchasePrice={purchasePrice}
+              returnUrl={resultsReturnUrl}
+            />
+
             <Link href="/assessment"
               className="block w-full text-center bg-indigo-600 text-white font-semibold text-sm py-3 rounded-xl">
               Update My Info
@@ -888,6 +903,17 @@ export default function ResultsDashboard({
                 <p className="text-[9px] text-amber-500">ⓘ Estimates only. Actual figures may vary.</p>
               </div>
             </div>
+          </div>
+
+          {/* Financial Profile (Myinfo / manual) */}
+          <div className="p-4 border-b border-slate-100">
+            <FinancialProfilePanel
+              initialProfile={initialFinancialProfile}
+              myinfoAvailable={myinfoAvailable}
+              currentMarketValue={assessment.currentMarketValue}
+              purchasePrice={purchasePrice}
+              returnUrl={resultsReturnUrl}
+            />
           </div>
 
           {/* Quick links */}
