@@ -12,6 +12,7 @@ import {
   getHdbByTown,
   getPrivateProjectsNearby,
   haversineKm,
+  dbStatus,
 } from "@/lib/dbQueries";
 import { isDbReady } from "@/lib/sqlite";
 import { isMongoConfigured } from "@/lib/mongodb"; // kept for private listings gate
@@ -370,6 +371,10 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     name: ec.name, price: ec.price, location: ec.location, bedrooms: ec.bedrooms,
   }));
 
+  const { hdbCount: hdbDbCount, privateCount: privateDbCount } = isDbReady()
+    ? await dbStatus()
+    : { hdbCount: 0, privateCount: 0 };
+
   // Debug info for the debug panel
   const debugInfo = {
     postalCode,
@@ -379,7 +384,9 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     leaseKnown,
     remainingLease,
     hdbTxCount: hdbTx.length,
+    hdbDbCount,
     privateProjectCount: privateListings.length,
+    privateDbCount,
     dbProjectsWithin1_5km: dbProjectCount,
     privateSource: dbUsed ? "SQLite (1.5 km radius)" : "API (district centroid)",
     hdbSource: hdbFromDb ? "SQLite (1.5 km radius)" : "API (town filter)",

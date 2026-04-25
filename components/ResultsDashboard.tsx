@@ -47,7 +47,9 @@ export interface DebugInfo {
   leaseKnown:             boolean;
   remainingLease:         number;
   hdbTxCount:             number;
+  hdbDbCount:             number;
   privateProjectCount:    number;
+  privateDbCount:         number;
   dbProjectsWithin1_5km: number;
   privateSource:          string;
   hdbSource:              string;
@@ -949,8 +951,10 @@ export default function ResultsDashboard({
                   ["Lat/Lng", debugInfo.lat ? `${debugInfo.lat.toFixed(5)}, ${debugInfo.lng.toFixed(5)}` : "Not geocoded"],
                   ["Lease Commence Year", debugInfo.leaseKnown ? `${debugInfo.leaseCommencementYear}` : "Unknown"],
                   ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "95 yrs (defaulted)"],
-                  ["HDB Txns Fetched", `${debugInfo.hdbTxCount}`],
+                  ["HDB Txns (API/town)", `${debugInfo.hdbTxCount}`],
+                  ["HDB Rows in DB", debugInfo.dbReady ? `${debugInfo.hdbDbCount.toLocaleString()}` : "—"],
                   ["Private Projects", `${debugInfo.privateProjectCount}`],
+                  ["Private Projects in DB", debugInfo.dbReady ? `${debugInfo.privateDbCount}` : "—"],
                   ["Within 1.5 km", debugInfo.dbReady ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A (seed DB first)"],
                   ["Private Source", debugInfo.privateSource],
                   ["HDB Source", debugInfo.hdbSource],

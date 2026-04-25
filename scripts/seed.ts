@@ -288,7 +288,7 @@ async function fetchAllHdb(): Promise<RawHdb[]> {
 
     offset += HDB_BATCH_SIZE;
     page++;
-    await sleep(300);   // polite but fast (was 1 500 ms)
+    await sleep(2700);  // data.gov.sg CKAN v1 limit: 4 calls/10s → need ≥2500ms
   }
 
   if (page > HDB_MAX_PAGES) {
