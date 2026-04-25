@@ -157,72 +157,117 @@ function openDb(): Database.Database {
 // ── HDB fetching ──────────────────────────────────────────────────────────────
 
 const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
-const HDB_BATCH_SIZE  = 1000; // conservative — reduces chance of timeouts / HTML responses
+const HDB_BATCH_SIZE  = 100;
+const HDB_MAX_PAGES   = 200;
+const HDB_MAX_RETRIES = 5;
 
 interface RawHdb { [key: string]: string }
 
-async function fetchJson<T>(url: string, attempt = 1): Promise<T> {
-  console.log(`    GET ${url.slice(0, 120)}${url.length > 120 ? "…" : ""}`);
+// Safe JSON fetcher — validates status + content-type before parsing.
+async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     signal:  AbortSignal.timeout(30000),
     headers: { Accept: "application/json" },
   });
 
-  const contentType = res.headers.get("content-type") ?? "";
-
-  if (res.status === 429) {
-    const wait = Math.min(2 ** attempt * 2000, 30000); // 4 s, 8 s, 16 s … max 30 s
-    console.log(`    429 Too Many Requests — retrying in ${wait / 1000}s (attempt ${attempt})`);
-    await sleep(wait);
-    return fetchJson<T>(url, attempt + 1);
-  }
-
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`HTTP ${res.status} from data.gov.sg:\n${text.slice(0, 500)}`);
+    throw new Error(`HTTP ${res.status}:\n${text.slice(0, 500)}`);
   }
 
-  if (!contentType.includes("application/json")) {
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) {
     const text = await res.text();
     throw new Error(
-      `Expected application/json but got "${contentType}".\n` +
-      `First 500 chars of response:\n${text.slice(0, 500)}`
+      `Expected JSON but got "${ct}".\nFirst 500 chars:\n${text.slice(0, 500)}`
     );
   }
 
   return res.json() as Promise<T>;
 }
 
-async function fetchHdbYear(year: number): Promise<RawHdb[]> {
-  const rows: RawHdb[] = [];
-  let offset = 0;
+// Fetches all HDB resale records with careful pagination, 429 backoff, and hard guards.
+// Filters to START_YEAR–CURRENT_YEAR in JS on the "month" field ("YYYY-MM").
+async function fetchAllHdb(): Promise<RawHdb[]> {
+  const all: RawHdb[] = [];
+  let offset  = 0;
+  let page    = 1;
+  let total   = Infinity; // updated from first response
 
-  while (true) {
-    const sql = [
-      `SELECT * FROM "${HDB_RESOURCE_ID}"`,
-      `WHERE month >= '${year}-01' AND month <= '${year}-12'`,
-      `LIMIT ${HDB_BATCH_SIZE} OFFSET ${offset}`,
-    ].join(" ");
-    const url = `https://data.gov.sg/api/action/datastore_search_sql?sql=${encodeURIComponent(sql)}`;
+  while (page <= HDB_MAX_PAGES) {
+    const url =
+      `https://data.gov.sg/api/action/datastore_search` +
+      `?resource_id=${HDB_RESOURCE_ID}` +
+      `&limit=${HDB_BATCH_SIZE}` +
+      `&offset=${offset}`;
 
-    let batch: RawHdb[];
-    try {
-      const json = await fetchJson<{ result?: { records?: RawHdb[] } }>(url);
-      batch = json?.result?.records ?? [];
-    } catch (e) {
-      console.error(`\n  ✗ Failed fetching year ${year} offset ${offset}:`, (e as Error).message);
-      console.error("  Stopping pagination for this year — partial data saved.");
+    type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
+    // 429-aware fetch with up to HDB_MAX_RETRIES attempts
+    let json: HdbPage | null = null;
+    for (let attempt = 1; attempt <= HDB_MAX_RETRIES; attempt++) {
+      const res = await fetch(url, {
+        signal:  AbortSignal.timeout(30000),
+        headers: { Accept: "application/json" },
+      });
+
+      if (res.status === 429) {
+        const wait = Math.min(4000 * 2 ** (attempt - 1), 64000); // 4s,8s,16s,32s,64s
+        console.log(`    429 — attempt ${attempt}/${HDB_MAX_RETRIES}, waiting ${wait / 1000}s…`);
+        if (attempt === HDB_MAX_RETRIES) {
+          console.error("  ✗ Max retries reached on 429. Stopping — partial data saved.");
+          return all;
+        }
+        await sleep(wait);
+        continue;
+      }
+
+      const ct = res.headers.get("content-type") ?? "";
+      if (!res.ok || !ct.includes("application/json")) {
+        const text = await res.text();
+        console.error(`  ✗ Bad response (${res.status}, "${ct}"):\n${text.slice(0, 500)}`);
+        console.error("  Stopping — partial data saved.");
+        return all;
+      }
+
+      json = await res.json() as HdbPage;
       break;
     }
 
-    rows.push(...batch);
-    if (batch.length < HDB_BATCH_SIZE) break; // last page
+    if (!json) break;
+
+    const batch = json.result?.records ?? [];
+    if (typeof json.result?.total === "number") total = json.result.total;
+
+    console.log(`  Page ${page} | offset ${offset} | got ${batch.length} | total ${total === Infinity ? "?" : total}`);
+
+    if (batch.length === 0) {
+      console.log("  Empty page — pagination complete.");
+      break;
+    }
+
+    // Filter to desired year window in JS
+    const inRange = batch.filter((r) => {
+      const y = parseInt((r.month ?? "0000").slice(0, 4), 10);
+      return y >= START_YEAR && y <= CURRENT_YEAR;
+    });
+    all.push(...inRange);
+
+    // Stop if we've consumed all available records
+    if (offset + batch.length >= total) {
+      console.log("  Reached end of dataset (offset + fetched >= total).");
+      break;
+    }
 
     offset += HDB_BATCH_SIZE;
-    await sleep(800); // be polite between pages
+    page++;
+    await sleep(1500);
   }
 
-  return rows;
+  if (page > HDB_MAX_PAGES) {
+    console.warn(`  ⚠ Hit MAX_PAGES (${HDB_MAX_PAGES}) safety guard — stopping.`);
+  }
+
+  return all;
 }
 
 // ── Private transaction fetching (URA) ────────────────────────────────────────
@@ -319,16 +364,9 @@ async function main() {
 
   // ── HDB ────────────────────────────────────────────────────────────────────
 
-  console.log(`Fetching HDB resale data: ${START_YEAR}–${CURRENT_YEAR}`);
-  const allHdb: RawHdb[] = [];
-  for (let year = START_YEAR; year <= CURRENT_YEAR; year++) {
-    process.stdout.write(`  Year ${year}... `);
-    const rows = await fetchHdbYear(year);
-    console.log(`${rows.length} records`);
-    allHdb.push(...rows);
-    await sleep(1500); // pause between years to avoid rate-limiting
-  }
-  console.log(`Total HDB records: ${allHdb.length}\n`);
+  console.log(`Fetching HDB resale data (${START_YEAR}–${CURRENT_YEAR}) via datastore_search…`);
+  const allHdb = await fetchAllHdb();
+  console.log(`\nTotal HDB records in range: ${allHdb.length}\n`);
 
   const uniqueHdbAddr = [...new Set(allHdb.map((r) => `BLK ${r.block} ${r.street_name}`))];
   console.log(`Geocoding ${uniqueHdbAddr.length} unique HDB addresses...`);

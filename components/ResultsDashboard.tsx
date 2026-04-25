@@ -276,7 +276,7 @@ function UpgradePathCard({
   return (
     <div
       onClick={onClick}
-      className={`relative bg-white rounded-xl border-2 p-4 cursor-pointer transition-all select-none ${
+      className={`relative bg-white rounded-xl border-2 p-4 cursor-pointer transition-all select-none flex flex-col ${
         isRecommended
           ? "border-indigo-500 shadow-md shadow-indigo-100"
           : isSelected
@@ -296,7 +296,7 @@ function UpgradePathCard({
         </div>
         <ScoreCircle score={score} recommended={isRecommended} />
       </div>
-      <ul className="mt-3 space-y-1.5">
+      <ul className="mt-3 space-y-1.5 flex-1">
         {meta.bullets.map((b, i) => (
           <li key={i} className="flex items-start gap-2 text-[11px] text-slate-500 leading-tight">
             <span className="mt-0.5 text-slate-300 shrink-0">•</span>
