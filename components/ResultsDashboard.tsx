@@ -353,136 +353,193 @@ function PropertyCard({
   const trendCls = trend >= 0 ? "text-emerald-600" : "text-red-500";
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex shadow-sm hover:shadow-md transition-shadow">
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
 
-      {/* Left: Image placeholder */}
-      <div className={`relative w-44 shrink-0 bg-gradient-to-br ${CARD_COLORS[(rank - 1) % CARD_COLORS.length]} flex flex-col items-center justify-center`}>
-        <div className="absolute top-2 left-2 w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
-          <span className="text-white font-black text-sm">{rank}</span>
-        </div>
-        <div className="text-white text-center px-3">
-          <div className="text-4xl mb-2">🏙️</div>
-          <p className="text-[10px] font-semibold text-white/80 leading-tight text-center">
-            {listing.marketSegment}
-          </p>
-          {listing.distanceKm !== null && (
-            <p className="text-[11px] font-bold text-white mt-1">
-              📍 {listing.distanceKm} km
-            </p>
-          )}
-        </div>
-        {affordable && (
-          <div className="absolute bottom-2 left-2 right-2 bg-emerald-500/90 text-white text-[9px] font-bold text-center rounded py-0.5">
-            ✓ Within Budget
+      {/* ── Mobile layout ── */}
+      <div className="md:hidden">
+        {/* Gradient header band */}
+        <div className={`bg-gradient-to-r ${CARD_COLORS[(rank - 1) % CARD_COLORS.length]} px-4 py-3`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 bg-white/25 rounded-lg flex items-center justify-center shrink-0">
+                <span className="text-white font-black text-sm">{rank}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-white text-sm leading-tight truncate">{listing.project}</p>
+                <p className="text-[10px] text-white/70 truncate">📍 {listing.street}</p>
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-2xl font-black text-white leading-none">{listing.propertyScore}</p>
+              <p className="text-[9px] text-white/60">/100</p>
+            </div>
           </div>
-        )}
-      </div>
-
-      {/* Middle: Details */}
-      <div className="flex-1 p-4 min-w-0">
-        <div className="flex flex-wrap items-center gap-2 mb-0.5">
-          <h3 className="font-bold text-slate-900 text-base leading-tight">{listing.project}</h3>
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tenureCls}`}>
-            {tenureShort}
-          </span>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">{tenureShort}</span>
+            <span className="text-[10px] text-white/80">{listing.marketSegment}</span>
+            {listing.distanceKm !== null && <span className="text-[10px] text-white/80">📍 {listing.distanceKm} km</span>}
+            {affordable && <span className="text-[10px] bg-emerald-400/90 text-white font-bold px-2 py-0.5 rounded-full">✓ Within Budget</span>}
+          </div>
         </div>
-        <p className="text-xs text-slate-400 mb-2 flex items-center gap-1">
-          <span>📍</span> {listing.street}
-        </p>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-3">
+        {/* Key stats grid */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 p-4 border-b border-slate-100">
           <div>
-            <p className="text-[9px] text-slate-400">Est. Price Range ({selectedBr})</p>
+            <p className="text-[9px] text-slate-400">Est. Price ({selectedBr})</p>
             <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Avg PSM ({selectedBr})</p>
+            <p className="text-[9px] text-slate-400">Avg PSM</p>
             <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
-            <p className={`text-sm font-bold ${trendCls}`}>
-              {trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}
-            </p>
+            <p className="text-[9px] text-slate-400">3Y PSM Trend</p>
+            <p className={`text-sm font-bold ${trendCls}`}>{trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Transactions (3yr)</p>
+            <p className="text-[9px] text-slate-400">Est. Monthly</p>
+            <p className="text-sm font-bold text-slate-800">${fmt(mortLow)} – ${fmt(mortHigh)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] text-slate-400">Size ({selectedBr})</p>
+            <p className="text-sm font-bold text-slate-700">{def.sqmLow}–{def.sqmHigh} sqm</p>
+          </div>
+          <div>
+            <p className="text-[9px] text-slate-400">Transactions</p>
             <p className="text-sm font-bold text-slate-700">{listing.txCount} txns</p>
           </div>
-          {listing.distanceKm !== null && (
-            <div>
-              <p className="text-[9px] text-slate-400">Distance from Home</p>
-              <p className="text-sm font-bold text-indigo-600">📍 {listing.distanceKm} km</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right: Score + unit type + quick stats */}
-      <div className="w-52 shrink-0 border-l border-slate-100 p-3 flex flex-col gap-2">
-
-        {/* Score */}
-        <div className="flex items-center gap-2">
-          <SmallScore score={listing.propertyScore} />
-          <div>
-            <p className="text-[9px] text-slate-400">Project Score</p>
-            <Stars score={listing.propertyScore} />
-          </div>
         </div>
 
-        {/* Unit type selector */}
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-widest">Select Unit Type</p>
-            {numChildren > 0 && (
-              <span className="text-[8px] bg-emerald-100 text-emerald-700 font-semibold px-1.5 py-0.5 rounded-full">Recommended</span>
-            )}
-          </div>
-          <div className="flex gap-1 flex-wrap">
+        {/* Unit type + suitability row */}
+        <div className="px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex gap-1.5">
             {(["3BR", "4BR", "2BR", "1BR"] as BrId[]).map((br) => {
               const isFamily = br === "3BR" || br === "4BR";
-              const isSelected = selectedBr === br;
+              const isSel = selectedBr === br;
               return (
                 <button key={br} onClick={() => setSelectedBr(br)}
-                  className={`text-[10px] px-2 py-0.5 rounded border font-semibold transition-colors ${
-                    isSelected
-                      ? isFamily && numChildren > 0
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-slate-700 text-white border-slate-700"
-                      : "border-slate-200 text-slate-500 hover:border-slate-400"
+                  className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition-colors ${
+                    isSel
+                      ? isFamily && numChildren > 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-700 text-white border-slate-700"
+                      : "border-slate-200 text-slate-500"
                   }`}>
                   {br}
                 </button>
               );
             })}
           </div>
-          {numChildren > 0 && (
-            <p className="text-[9px] text-slate-400 mt-1">
-              ✓ Recommended: 3BR or 4BR
-            </p>
+          <div className="shrink-0 text-right">
+            <p className={`text-sm font-bold ${suitability.color}`}>{suitability.label}</p>
+            <p className="text-[9px] text-slate-400">{utScore}/100 score</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Desktop layout (unchanged) ── */}
+      <div className="hidden md:flex">
+
+        {/* Left: Image placeholder */}
+        <div className={`relative w-44 shrink-0 bg-gradient-to-br ${CARD_COLORS[(rank - 1) % CARD_COLORS.length]} flex flex-col items-center justify-center`}>
+          <div className="absolute top-2 left-2 w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
+            <span className="text-white font-black text-sm">{rank}</span>
+          </div>
+          <div className="text-white text-center px-3">
+            <div className="text-4xl mb-2">🏙️</div>
+            <p className="text-[10px] font-semibold text-white/80 leading-tight text-center">{listing.marketSegment}</p>
+            {listing.distanceKm !== null && <p className="text-[11px] font-bold text-white mt-1">📍 {listing.distanceKm} km</p>}
+          </div>
+          {affordable && (
+            <div className="absolute bottom-2 left-2 right-2 bg-emerald-500/90 text-white text-[9px] font-bold text-center rounded py-0.5">
+              ✓ Within Budget
+            </div>
           )}
         </div>
 
-        {/* Quick stats */}
-        <div className="bg-slate-50 rounded-lg p-2 space-y-1 text-[10px] flex-1">
-          <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
-          {[
-            { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
-            { label: "Avg PSM", value: `$${fmt(listing.medianPsm)}` },
-            { label: "Est. Monthly Mortgage", value: `$${fmt(mortLow)} – $${fmt(mortHigh)}` },
-          ].map(({ label, value }) => (
-            <div key={label} className="flex justify-between">
-              <span className="text-slate-400">{label}</span>
-              <span className="font-semibold text-slate-700">{value}</span>
-            </div>
-          ))}
-          <div className="flex justify-between">
-            <span className="text-slate-400">Suitability for Family</span>
-            <span className={`font-bold ${suitability.color}`}>{suitability.label}</span>
+        {/* Middle: Details */}
+        <div className="flex-1 p-4 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-0.5">
+            <h3 className="font-bold text-slate-900 text-base leading-tight">{listing.project}</h3>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tenureCls}`}>{tenureShort}</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Unit Type Score ({selectedBr})</span>
-            <span className="font-bold text-slate-700">{utScore}/100</span>
+          <p className="text-xs text-slate-400 mb-2 flex items-center gap-1"><span>📍</span> {listing.street}</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-3">
+            <div>
+              <p className="text-[9px] text-slate-400">Est. Price Range ({selectedBr})</p>
+              <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-400">Avg PSM ({selectedBr})</p>
+              <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
+              <p className={`text-sm font-bold ${trendCls}`}>{trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}</p>
+            </div>
+            <div>
+              <p className="text-[9px] text-slate-400">Transactions (3yr)</p>
+              <p className="text-sm font-bold text-slate-700">{listing.txCount} txns</p>
+            </div>
+            {listing.distanceKm !== null && (
+              <div>
+                <p className="text-[9px] text-slate-400">Distance from Home</p>
+                <p className="text-sm font-bold text-indigo-600">📍 {listing.distanceKm} km</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Score + unit type + quick stats */}
+        <div className="w-52 shrink-0 border-l border-slate-100 p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <SmallScore score={listing.propertyScore} />
+            <div>
+              <p className="text-[9px] text-slate-400">Project Score</p>
+              <Stars score={listing.propertyScore} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-widest">Select Unit Type</p>
+              {numChildren > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-700 font-semibold px-1.5 py-0.5 rounded-full">Recommended</span>}
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {(["3BR", "4BR", "2BR", "1BR"] as BrId[]).map((br) => {
+                const isFamily = br === "3BR" || br === "4BR";
+                const isSelected = selectedBr === br;
+                return (
+                  <button key={br} onClick={() => setSelectedBr(br)}
+                    className={`text-[10px] px-2 py-0.5 rounded border font-semibold transition-colors ${
+                      isSelected
+                        ? isFamily && numChildren > 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-700 text-white border-slate-700"
+                        : "border-slate-200 text-slate-500 hover:border-slate-400"
+                    }`}>
+                    {br}
+                  </button>
+                );
+              })}
+            </div>
+            {numChildren > 0 && <p className="text-[9px] text-slate-400 mt-1">✓ Recommended: 3BR or 4BR</p>}
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2 space-y-1 text-[10px] flex-1">
+            <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
+            {[
+              { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
+              { label: "Avg PSM", value: `$${fmt(listing.medianPsm)}` },
+              { label: "Est. Monthly Mortgage", value: `$${fmt(mortLow)} – $${fmt(mortHigh)}` },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex justify-between">
+                <span className="text-slate-400">{label}</span>
+                <span className="font-semibold text-slate-700">{value}</span>
+              </div>
+            ))}
+            <div className="flex justify-between">
+              <span className="text-slate-400">Suitability for Family</span>
+              <span className={`font-bold ${suitability.color}`}>{suitability.label}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Unit Type Score ({selectedBr})</span>
+              <span className="font-bold text-slate-700">{utScore}/100</span>
+            </div>
           </div>
         </div>
       </div>
@@ -543,6 +600,9 @@ export default function ResultsDashboard({
   // Map selected property
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
+  // Mobile menu / filter drawer
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+
   const defaultBr = defaultBrFromChildren(numChildren);
 
   // Private Condo listings — filtered by tenure, capped at 7
@@ -565,11 +625,31 @@ export default function ResultsDashboard({
   return (
     <div className="min-h-screen bg-slate-50" style={{ fontFamily: "system-ui, sans-serif" }}>
 
-      {/* ── Full-width header ── */}
+      {/* ── Header ── */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
-        <div className="flex items-center gap-4 px-4 py-3 max-w-[1600px] mx-auto">
 
-          {/* Logo */}
+        {/* Mobile header */}
+        <div className="md:hidden flex items-center gap-3 px-4 py-3">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0">
+            <span className="text-white text-xs font-black">SG</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] text-slate-400 leading-none">Your Home</p>
+            <p className="text-sm font-semibold text-slate-800 leading-tight truncate">{displayAddress}</p>
+          </div>
+          <Link href="/assessment" className="shrink-0 text-[10px] text-indigo-500 font-semibold">
+            ✏ Edit
+          </Link>
+          <button
+            onClick={() => setShowMobileMenu((v) => !v)}
+            className="shrink-0 w-9 h-9 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center transition-colors"
+          >
+            <span className="text-slate-700 text-base leading-none">{showMobileMenu ? "✕" : "☰"}</span>
+          </button>
+        </div>
+
+        {/* Desktop header */}
+        <div className="hidden md:flex items-center gap-4 px-4 py-3 max-w-[1600px] mx-auto">
           <div className="flex items-center gap-2 shrink-0">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <span className="text-white text-xs font-black">SG</span>
@@ -579,32 +659,23 @@ export default function ResultsDashboard({
               <p className="text-[9px] text-slate-400 leading-none mt-0.5">Upgrade Smarter. Live Better.</p>
             </div>
           </div>
-
           <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" />
-
-          {/* Address */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-slate-400 text-sm shrink-0">📍</span>
             <div className="min-w-0">
               <p className="text-[9px] text-slate-400 leading-none">Your Home</p>
               <p className="text-sm font-semibold text-slate-800 leading-tight truncate">{displayAddress}</p>
             </div>
-            <Link href="/assessment"
-              className="ml-1 text-[10px] text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 shrink-0">
+            <Link href="/assessment" className="ml-1 text-[10px] text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 shrink-0">
               ✏ Edit
             </Link>
           </div>
-
           <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" />
-
-          {/* Key stats */}
           <div className="flex items-center gap-5 flex-1 overflow-x-auto">
             {numChildren > 0 && (
               <div className="shrink-0">
                 <p className="text-[9px] text-slate-400">Family</p>
-                <p className="text-sm font-semibold text-slate-800">
-                  {numChildren} Kid{numChildren !== 1 ? "s" : ""}
-                </p>
+                <p className="text-sm font-semibold text-slate-800">{numChildren} Kid{numChildren !== 1 ? "s" : ""}</p>
               </div>
             )}
             <div className="shrink-0">
@@ -618,7 +689,6 @@ export default function ResultsDashboard({
               </p>
             </div>
           </div>
-
           <Link href="/assessment"
             className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors">
             Update My Info
@@ -626,10 +696,89 @@ export default function ResultsDashboard({
         </div>
       </header>
 
-      <div className="flex max-w-[1600px] mx-auto" style={{ minHeight: "calc(100vh - 60px)" }}>
+      {/* ── Mobile filter drawer ── */}
+      {showMobileMenu && (
+        <div className="md:hidden bg-white border-b border-slate-200 shadow-lg z-10">
+          <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
 
-        {/* ── Left sidebar ── */}
-        <aside className="w-60 shrink-0 bg-white border-r border-slate-200 overflow-y-auto sticky top-[60px] self-start" style={{ maxHeight: "calc(100vh - 60px)" }}>
+            {/* Upgrade summary */}
+            <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-100">
+              <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wide mb-1">Selected Path</p>
+              <p className="text-sm font-black text-indigo-800">{selectedUpgrade}</p>
+              <p className="text-[10px] text-indigo-500 mt-0.5">Tap a path card to change</p>
+            </div>
+
+            {/* Min Bedrooms */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Min Bedrooms</p>
+              <div className="flex gap-2">
+                {(["1BR", "2BR", "3BR", "4BR"] as BrId[]).map((br) => {
+                  const isFamily = br === "3BR" || br === "4BR";
+                  return (
+                    <button key={br} onClick={() => setBrFilter(br)}
+                      className={`flex-1 text-sm py-2 rounded-xl border font-semibold transition-colors ${
+                        brFilter === br
+                          ? isFamily && numChildren > 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-700 text-white border-slate-700"
+                          : "border-slate-200 text-slate-500"
+                      }`}>
+                      {br}
+                    </button>
+                  );
+                })}
+              </div>
+              {numChildren > 0 && <p className="text-[10px] text-indigo-500 mt-1">★ 3BR/4BR recommended for your family</p>}
+            </div>
+
+            {/* Tenure filter */}
+            {selectedUpgrade === "Private Condo" && (
+              <div>
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Tenure</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["All", "99yr", "999yr", "Freehold"] as const).map((t) => {
+                    const label = t === "99yr" ? "99-yr" : t === "999yr" ? "999-yr" : t;
+                    return (
+                      <button key={t} onClick={() => setTenureFilter(t)}
+                        className={`py-2 rounded-xl border text-sm font-semibold transition-colors ${
+                          tenureFilter === t ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500"
+                        }`}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Financial snapshot */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Financial Snapshot</p>
+              <div className="bg-slate-50 rounded-xl p-3 space-y-2">
+                {[
+                  { label: "Combined Income", value: `$${fmt(assessment.combinedIncome)}/mo` },
+                  { label: "Net Proceeds (Est.)", value: fmtM(assessment.netProceeds) },
+                  { label: "Private Budget", value: fmtM(assessment.privateBudget) },
+                  { label: "Remaining Lease", value: leaseKnown ? `${remainingLease} yrs` : "≥95 yrs (est.)" },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between text-sm">
+                    <span className="text-slate-500">{label}</span>
+                    <span className="font-semibold text-slate-800">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Link href="/assessment"
+              className="block w-full text-center bg-indigo-600 text-white font-semibold text-sm py-3 rounded-xl">
+              Update My Info
+            </Link>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col md:flex md:flex-row max-w-[1600px] mx-auto" style={{ minHeight: "calc(100vh - 60px)" }}>
+
+        {/* ── Left sidebar — desktop only ── */}
+        <aside className="hidden md:block w-60 shrink-0 bg-white border-r border-slate-200 overflow-y-auto sticky top-[60px] self-start" style={{ maxHeight: "calc(100vh - 60px)" }}>
 
           {/* Filters */}
           <div className="p-4 border-b border-slate-100">
@@ -774,7 +923,7 @@ export default function ResultsDashboard({
         </aside>
 
         {/* ── Main content ── */}
-        <main className="flex-1 overflow-x-hidden p-4 space-y-4 min-w-0">
+        <main className="flex-1 overflow-x-hidden p-3 md:p-4 space-y-4 min-w-0">
 
 
           {/* ── Section 1: Upgrade Path Assessment ── */}
@@ -787,9 +936,9 @@ export default function ResultsDashboard({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-              {/* 4 option cards */}
-              <div className="lg:col-span-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* 4 option cards — 2×2 on mobile, 4-col on desktop */}
+              <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
                 {assessment.options.map((opt, i) => (
                   <UpgradePathCard
                     key={opt.type}
@@ -797,13 +946,13 @@ export default function ResultsDashboard({
                     score={optionScores[i] ?? 60}
                     isRecommended={opt.type === assessment.recommendation}
                     isSelected={opt.type === selectedUpgrade}
-                    onClick={() => setSelectedUpgrade(opt.type)}
+                    onClick={() => { setSelectedUpgrade(opt.type); setShowMobileMenu(false); }}
                   />
                 ))}
               </div>
 
-              {/* Why panel */}
-              <div className="lg:col-span-1">
+              {/* Why panel — below on mobile, right column on desktop */}
+              <div className="lg:w-52 shrink-0">
                 <WhyPanel
                   recommendation={selOption?.type ?? assessment.recommendation}
                   numChildren={numChildren}
@@ -816,7 +965,7 @@ export default function ResultsDashboard({
           </section>
 
           {/* ── Section 2: Top Properties + Map ── */}
-          <div className="flex gap-4">
+          <div className="flex flex-col md:flex-row gap-4">
 
             {/* Properties list */}
             <div className="flex-1 min-w-0 space-y-3">
@@ -989,7 +1138,7 @@ export default function ResultsDashboard({
             </div>
 
             {/* Map panel */}
-            <div className="w-80 shrink-0">
+            <div className="w-full md:w-80 shrink-0">
               <MapWrapper
                 lat={lat} lng={lng} postalCode={postalCode}
                 properties={displayedListings}
