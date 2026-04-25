@@ -96,6 +96,8 @@ function fmt(n: number) { return n.toLocaleString("en-SG"); }
 function fmtM(n: number) {
   return n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(2)}M` : `$${(n / 1_000).toFixed(0)}K`;
 }
+function fmtK(n: number) { return `$${(n / 1000).toFixed(1)}K`; }
+function toPsf(psm: number) { return Math.round(psm / 10.764); }
 
 function estimateMortgage(price: number): number {
   const loan = price * 0.75;
@@ -389,16 +391,16 @@ function PropertyCard({
             <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Avg PSM</p>
-            <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
+            <p className="text-[9px] text-slate-400">Avg PSF</p>
+            <p className="text-sm font-bold text-slate-800">${fmt(toPsf(listing.medianPsm))}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">3Y PSM Trend</p>
+            <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
             <p className={`text-sm font-bold ${trendCls}`}>{trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}</p>
           </div>
           <div>
             <p className="text-[9px] text-slate-400">Est. Monthly</p>
-            <p className="text-sm font-bold text-slate-800">${fmt(mortLow)} – ${fmt(mortHigh)}</p>
+            <p className="text-sm font-bold text-slate-800">{fmtK(mortLow)} – {fmtK(mortHigh)}</p>
           </div>
           <div>
             <p className="text-[9px] text-slate-400">Size ({selectedBr})</p>
@@ -468,8 +470,8 @@ function PropertyCard({
               <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
             </div>
             <div>
-              <p className="text-[9px] text-slate-400">Avg PSM ({selectedBr})</p>
-              <p className="text-sm font-bold text-slate-800">${fmt(listing.medianPsm)}</p>
+              <p className="text-[9px] text-slate-400">Avg PSF ({selectedBr})</p>
+              <p className="text-sm font-bold text-slate-800">${fmt(toPsf(listing.medianPsm))}</p>
             </div>
             <div>
               <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
@@ -524,8 +526,8 @@ function PropertyCard({
             <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
             {[
               { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
-              { label: "Avg PSM", value: `$${fmt(listing.medianPsm)}` },
-              { label: "Est. Monthly Mortgage", value: `$${fmt(mortLow)} – $${fmt(mortHigh)}` },
+              { label: "Avg PSF", value: `$${fmt(toPsf(listing.medianPsm))}` },
+              { label: "Est. Monthly Mortgage", value: `${fmtK(mortLow)} – ${fmtK(mortHigh)}` },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between">
                 <span className="text-slate-400">{label}</span>

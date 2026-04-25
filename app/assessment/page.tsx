@@ -19,7 +19,7 @@ const CITIZENSHIPS = [
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS  = Array.from({ length: CURRENT_YEAR - 1979 }, (_, i) => CURRENT_YEAR - i);
-const SQM_PLACEHOLDER: Record<string, string> = {
+const SQM_DEFAULTS: Record<string, string> = {
   "3-Room": "67", "4-Room": "95", "5-Room": "118", "Executive": "145",
 };
 
@@ -239,7 +239,10 @@ export default function AssessmentPage() {
                 <div className="grid grid-cols-2 gap-2">
                   {FLAT_TYPES.map((ft) => (
                     <button key={ft.value} type="button"
-                      onClick={() => set("flatType", ft.value)}
+                      onClick={() => {
+                        set("flatType", ft.value);
+                        if (!form.sqm) set("sqm", SQM_DEFAULTS[ft.value] ?? "");
+                      }}
                       className={`text-left rounded-2xl border-2 px-4 py-3 transition-all min-h-[56px]
                         ${form.flatType === ft.value
                           ? "border-indigo-500 bg-indigo-50"
@@ -270,7 +273,7 @@ export default function AssessmentPage() {
                   <input
                     type="text" inputMode="numeric" name="sqm"
                     value={form.sqm} onChange={handleNum}
-                    placeholder={SQM_PLACEHOLDER[form.flatType] ?? "95"}
+                    placeholder={SQM_DEFAULTS[form.flatType] ?? "95"}
                     className={inputCls}
                   />
                 </div>
