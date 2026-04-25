@@ -157,29 +157,71 @@ function openDb(): Database.Database {
 // ── HDB fetching ──────────────────────────────────────────────────────────────
 
 const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+const HDB_BATCH_SIZE  = 1000; // conservative — reduces chance of timeouts / HTML responses
 
 interface RawHdb { [key: string]: string }
+
+async function fetchJson<T>(url: string, attempt = 1): Promise<T> {
+  console.log(`    GET ${url.slice(0, 120)}${url.length > 120 ? "…" : ""}`);
+  const res = await fetch(url, {
+    signal:  AbortSignal.timeout(30000),
+    headers: { Accept: "application/json" },
+  });
+
+  const contentType = res.headers.get("content-type") ?? "";
+
+  if (res.status === 429) {
+    const wait = Math.min(2 ** attempt * 2000, 30000); // 4 s, 8 s, 16 s … max 30 s
+    console.log(`    429 Too Many Requests — retrying in ${wait / 1000}s (attempt ${attempt})`);
+    await sleep(wait);
+    return fetchJson<T>(url, attempt + 1);
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status} from data.gov.sg:\n${text.slice(0, 500)}`);
+  }
+
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(
+      `Expected application/json but got "${contentType}".\n` +
+      `First 500 chars of response:\n${text.slice(0, 500)}`
+    );
+  }
+
+  return res.json() as Promise<T>;
+}
 
 async function fetchHdbYear(year: number): Promise<RawHdb[]> {
   const rows: RawHdb[] = [];
   let offset = 0;
-  const limit = 5000;
+
   while (true) {
-    const sql = `SELECT * FROM "${HDB_RESOURCE_ID}" WHERE month >= '${year}-01' AND month <= '${year}-12' LIMIT ${limit} OFFSET ${offset}`;
+    const sql = [
+      `SELECT * FROM "${HDB_RESOURCE_ID}"`,
+      `WHERE month >= '${year}-01' AND month <= '${year}-12'`,
+      `LIMIT ${HDB_BATCH_SIZE} OFFSET ${offset}`,
+    ].join(" ");
     const url = `https://data.gov.sg/api/action/datastore_search_sql?sql=${encodeURIComponent(sql)}`;
+
+    let batch: RawHdb[];
     try {
-      const res  = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      const json = await res.json() as { result?: { records?: RawHdb[] } };
-      const batch = json?.result?.records ?? [];
-      rows.push(...batch);
-      if (batch.length < limit) break;
-      offset += limit;
-      await sleep(500);
+      const json = await fetchJson<{ result?: { records?: RawHdb[] } }>(url);
+      batch = json?.result?.records ?? [];
     } catch (e) {
-      console.error(`\n  Error fetching year ${year} offset ${offset}:`, e);
+      console.error(`\n  ✗ Failed fetching year ${year} offset ${offset}:`, (e as Error).message);
+      console.error("  Stopping pagination for this year — partial data saved.");
       break;
     }
+
+    rows.push(...batch);
+    if (batch.length < HDB_BATCH_SIZE) break; // last page
+
+    offset += HDB_BATCH_SIZE;
+    await sleep(800); // be polite between pages
   }
+
   return rows;
 }
 
@@ -284,7 +326,7 @@ async function main() {
     const rows = await fetchHdbYear(year);
     console.log(`${rows.length} records`);
     allHdb.push(...rows);
-    await sleep(800);
+    await sleep(1500); // pause between years to avoid rate-limiting
   }
   console.log(`Total HDB records: ${allHdb.length}\n`);
 
