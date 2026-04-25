@@ -399,7 +399,7 @@ function PropertyCard({
             <p className={`text-sm font-bold ${trendCls}`}>{trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Est. Monthly</p>
+            <p className="text-[9px] text-slate-400">Est. Monthly Rental</p>
             <p className="text-sm font-bold text-slate-800">{fmtK(mortLow)} – {fmtK(mortHigh)}</p>
           </div>
           <div>
@@ -527,7 +527,7 @@ function PropertyCard({
             {[
               { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
               { label: "Avg PSF", value: `$${fmt(toPsf(listing.medianPsm))}` },
-              { label: "Est. Monthly Mortgage", value: `${fmtK(mortLow)} – ${fmtK(mortHigh)}` },
+              { label: "Est. Monthly Rental", value: `${fmtK(mortLow)} – ${fmtK(mortHigh)}` },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between">
                 <span className="text-slate-400">{label}</span>
@@ -754,6 +754,13 @@ export default function ResultsDashboard({
             {/* Financial snapshot */}
             <div>
               <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Financial Snapshot</p>
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-2">
+                <p className="text-[9px] text-indigo-500 mb-0.5">Est. Current Flat Value</p>
+                <p className="text-base font-black text-indigo-700">{fmtM(assessment.currentMarketValue)}</p>
+                <p className="text-[9px] text-indigo-400">
+                  Capital gain: {assessment.capitalGain >= 0 ? "+" : ""}{fmtM(assessment.capitalGain)}
+                </p>
+              </div>
               <div className="bg-slate-50 rounded-xl p-3 space-y-2">
                 {[
                   { label: "Combined Income", value: `$${fmt(assessment.combinedIncome)}/mo` },
@@ -854,6 +861,14 @@ export default function ResultsDashboard({
           <div className="p-4 border-b border-slate-100">
             <p className="text-xs font-bold text-slate-700 mb-3">My Financial Snapshot</p>
             <div className="space-y-2.5">
+              {/* Current flat value highlight */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-2">
+                <p className="text-[9px] text-indigo-500 mb-0.5">Est. Current Flat Value</p>
+                <p className="text-sm font-black text-indigo-700">{fmtM(assessment.currentMarketValue)}</p>
+                <p className="text-[9px] text-indigo-400">
+                  Capital gain: {assessment.capitalGain >= 0 ? "+" : ""}{fmtM(assessment.capitalGain)}
+                </p>
+              </div>
               {[
                 { label: "Monthly Income (Combined)", value: `$${fmt(assessment.combinedIncome)}` },
                 { label: "Remaining Loan (Current)", value: `$${fmt(remainingLoan)}` },
