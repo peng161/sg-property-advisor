@@ -13,6 +13,9 @@ export interface FinancialProfile {
   // HDB loan
   outstandingLoanBalance: number | null;
   monthlyLoanInstalment:  number | null;
+  // Spouse CPF (manual entry only — Myinfo covers primary applicant)
+  spouseCpfOaBalance:      number | null;
+  spouseCpfUsedForHousing: number | null;
   // HDB flat info (non-sensitive metadata only)
   hdbFlat: {
     type:                  string;

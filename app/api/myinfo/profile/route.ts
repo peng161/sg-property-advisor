@@ -27,11 +27,13 @@ export async function POST(req: NextRequest) {
     cpfOaBalance:           toNum(body.cpfOaBalance),
     cpfSaBalance:           toNum(body.cpfSaBalance),
     cpfMaBalance:           toNum(body.cpfMaBalance),
-    cpfUsedForHousing:      toNum(body.cpfUsedForHousing),
-    monthlyContribution:    toNum(body.monthlyContribution),
-    outstandingLoanBalance: toNum(body.outstandingLoanBalance),
-    monthlyLoanInstalment:  toNum(body.monthlyLoanInstalment),
-    hdbFlat:                null,
+    cpfUsedForHousing:       toNum(body.cpfUsedForHousing),
+    monthlyContribution:     toNum(body.monthlyContribution),
+    outstandingLoanBalance:  toNum(body.outstandingLoanBalance),
+    monthlyLoanInstalment:   toNum(body.monthlyLoanInstalment),
+    spouseCpfOaBalance:      toNum(body.spouseCpfOaBalance),
+    spouseCpfUsedForHousing: toNum(body.spouseCpfUsedForHousing),
+    hdbFlat:                 null,
   };
 
   const token = await encryptProfile(profile);

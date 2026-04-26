@@ -48,6 +48,14 @@ export interface UpgradeScoreInput {
 
   // ── Mode ──────────────────────────────────────────────────────────────────
   conservativeMode:       boolean;
+
+  // ── Optional PSF market check ──────────────────────────────────────────
+  marketPsfEstimate?: {
+    estimated_psf_low:  number;
+    estimated_psf_mid:  number;
+    estimated_psf_high: number;
+    confidence:         "High" | "Medium" | "Low";
+  };
 }
 
 export interface ScoreItem {
@@ -452,6 +460,31 @@ export function computeUpgradeScore(inp: UpgradeScoreInput): UpgradeScoreResult 
     risks.push({ text: `School is ${inp.distanceToSchoolKm} km away — outside primary school priority zones`, score: inp.distanceToSchoolKm });
   if (con && totalScore >= 60 && totalScore <= 70)
     risks.push({ text: "Borderline score in conservative mode — small adverse change could tip affordability", score: 1 });
+
+  // PSF market check signals
+  const psf = inp.marketPsfEstimate;
+  if (psf && psf.estimated_psf_mid > 0 && inp.targetPropertyPrice > 0) {
+    const estSqm = 100; // rough assumption for PSF → price comparison
+    const impliedPsf = Math.round(inp.targetPropertyPrice / estSqm / 10.7639);
+    if (psf.confidence !== "Low") {
+      if (impliedPsf > psf.estimated_psf_high) {
+        risks.push({
+          text: `Your target price implies ~S$${impliedPsf.toLocaleString("en-SG")} psf — above estimated market high of S$${psf.estimated_psf_high.toLocaleString("en-SG")} psf (potentially overpriced)`,
+          score: 2,
+        });
+      } else if (impliedPsf >= psf.estimated_psf_low) {
+        reasons.push({
+          text: `Target price implies ~S$${impliedPsf.toLocaleString("en-SG")} psf — within estimated market range (S$${psf.estimated_psf_low.toLocaleString("en-SG")}–S$${psf.estimated_psf_high.toLocaleString("en-SG")} psf)`,
+          score: 0.5,
+        });
+      }
+    } else {
+      risks.push({
+        text: "PSF estimate confidence is Low — verify current market price with an agent before committing",
+        score: 0.5,
+      });
+    }
+  }
 
   reasons.sort((a, b) => b.score - a.score);
   risks.sort((a, b) => b.score - a.score);

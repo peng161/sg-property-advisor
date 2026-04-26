@@ -7,6 +7,8 @@ import {
 } from "@/lib/upgradeScore";
 import type { FinancialProfile } from "@/lib/myinfo/types";
 import type { AssessmentResult } from "@/lib/calculator";
+import PropertyResearchCard from "./PropertyResearchCard";
+import type { ResearchResult } from "@/lib/services/propertyResearchService";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -160,10 +162,10 @@ export default function UpgradeScorePanel({
     String(fp?.outstandingLoanBalance ?? remainingLoan)
   );
   const [cpfUsed, setCpfUsed] = useState(
-    String(fp?.cpfUsedForHousing ?? 0)
+    String((fp?.cpfUsedForHousing ?? 0) + (fp?.spouseCpfUsedForHousing ?? 0))
   );
   const [cpfOa, setCpfOa] = useState(
-    String(fp?.cpfOaBalance ?? 0)
+    String((fp?.cpfOaBalance ?? 0) + (fp?.spouseCpfOaBalance ?? 0))
   );
   const [cashSavings, setCashSavings] = useState("50000");
   const [currentLeaseYears, setCurrentLeaseYears] = useState(String(remainingLease));
@@ -196,6 +198,10 @@ export default function UpgradeScorePanel({
 
   // Mode
   const [conservative, setConservative] = useState(false);
+
+  // PSF research
+  const [psfEstimate, setPsfEstimate] = useState<ResearchResult | null>(null);
+  const [researchProject, setResearchProject] = useState("");
 
   // UI state
   const [result, setResult]       = useState<UpgradeScoreResult | null>(null);
@@ -252,6 +258,7 @@ export default function UpgradeScorePanel({
       liquidity,
       priceTrend,
       conservativeMode:      conservative,
+      marketPsfEstimate:     psfEstimate ?? undefined,
     };
 
     setResult(computeUpgradeScore(inp));
@@ -263,7 +270,7 @@ export default function UpgradeScorePanel({
     targetPrice, propType, targetBedrooms, targetLeaseYears, targetPropertyAge,
     interestRate, loanTenure, reno,
     familySize, numChildren, hasSchoolKids, distanceParents, distanceSchool,
-    demand, liquidity, priceTrend, conservative, flatType,
+    demand, liquidity, priceTrend, conservative, flatType, psfEstimate,
   ]);
 
   // ── AI explanation ───────────────────────────────────────────────────────
@@ -398,6 +405,24 @@ export default function UpgradeScorePanel({
                 onChange={setLoanTenure} min={5} step={1} />
             </div>
           </div>
+
+          {/* PSF Research (Condo / EC only) */}
+          {(propType === "Condo" || propType === "EC") && (
+            <div>
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Market Price Check</p>
+              <PropertyResearchCard
+                initialProjectName={researchProject}
+                unitType={`${targetBedrooms}-bedder`}
+                targetPsf={Number(targetPrice) > 0 && Number(targetBedrooms) > 0
+                  ? Math.round(Number(targetPrice) / (Number(targetBedrooms) * 100) / 10.764)
+                  : 0}
+                onEstimate={(est) => {
+                  setPsfEstimate(est);
+                  if (est) setResearchProject(est.project_name);
+                }}
+              />
+            </div>
+          )}
 
           {/* Family */}
           <div>

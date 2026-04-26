@@ -69,21 +69,25 @@ function calcAffordability(profile: FinancialProfile, currentMarketValue: number
 // ── Manual form ────────────────────────────────────────────────────────────────
 
 interface ManualValues {
-  cpfOaBalance:           string;
-  cpfSaBalance:           string;
-  monthlyContribution:    string;
-  outstandingLoanBalance: string;
-  monthlyLoanInstalment:  string;
-  cpfUsedForHousing:      string;
+  cpfOaBalance:            string;
+  cpfSaBalance:            string;
+  monthlyContribution:     string;
+  outstandingLoanBalance:  string;
+  monthlyLoanInstalment:   string;
+  cpfUsedForHousing:       string;
+  spouseCpfOaBalance:      string;
+  spouseCpfUsedForHousing: string;
 }
 
 const EMPTY_MANUAL: ManualValues = {
-  cpfOaBalance:           "",
-  cpfSaBalance:           "",
-  monthlyContribution:    "",
-  outstandingLoanBalance: "",
-  monthlyLoanInstalment:  "",
-  cpfUsedForHousing:      "",
+  cpfOaBalance:            "",
+  cpfSaBalance:            "",
+  monthlyContribution:     "",
+  outstandingLoanBalance:  "",
+  monthlyLoanInstalment:   "",
+  cpfUsedForHousing:       "",
+  spouseCpfOaBalance:      "",
+  spouseCpfUsedForHousing: "",
 };
 
 function numVal(v: string): number | null {
@@ -143,15 +147,17 @@ export default function FinancialProfilePanel({
 
   const applyManual = useCallback(() => {
     const p: FinancialProfile = {
-      source:                 "manual",
-      cpfOaBalance:           numVal(manual.cpfOaBalance),
-      cpfSaBalance:           numVal(manual.cpfSaBalance),
-      cpfMaBalance:           null,
-      cpfUsedForHousing:      numVal(manual.cpfUsedForHousing),
-      monthlyContribution:    numVal(manual.monthlyContribution),
-      outstandingLoanBalance: numVal(manual.outstandingLoanBalance),
-      monthlyLoanInstalment:  numVal(manual.monthlyLoanInstalment),
-      hdbFlat:                null,
+      source:                  "manual",
+      cpfOaBalance:            numVal(manual.cpfOaBalance),
+      cpfSaBalance:            numVal(manual.cpfSaBalance),
+      cpfMaBalance:            null,
+      cpfUsedForHousing:       numVal(manual.cpfUsedForHousing),
+      monthlyContribution:     numVal(manual.monthlyContribution),
+      outstandingLoanBalance:  numVal(manual.outstandingLoanBalance),
+      monthlyLoanInstalment:   numVal(manual.monthlyLoanInstalment),
+      spouseCpfOaBalance:      numVal(manual.spouseCpfOaBalance),
+      spouseCpfUsedForHousing: numVal(manual.spouseCpfUsedForHousing),
+      hdbFlat:                 null,
     };
     setProfile(p);
     setView("profile");
@@ -161,15 +167,17 @@ export default function FinancialProfilePanel({
     setSaving(true);
     try {
       const body: FinancialProfile = {
-        source:                 "manual",
-        cpfOaBalance:           numVal(manual.cpfOaBalance),
-        cpfSaBalance:           numVal(manual.cpfSaBalance),
-        cpfMaBalance:           null,
-        cpfUsedForHousing:      numVal(manual.cpfUsedForHousing),
-        monthlyContribution:    numVal(manual.monthlyContribution),
-        outstandingLoanBalance: numVal(manual.outstandingLoanBalance),
-        monthlyLoanInstalment:  numVal(manual.monthlyLoanInstalment),
-        hdbFlat:                null,
+        source:                  "manual",
+        cpfOaBalance:            numVal(manual.cpfOaBalance),
+        cpfSaBalance:            numVal(manual.cpfSaBalance),
+        cpfMaBalance:            null,
+        cpfUsedForHousing:       numVal(manual.cpfUsedForHousing),
+        monthlyContribution:     numVal(manual.monthlyContribution),
+        outstandingLoanBalance:  numVal(manual.outstandingLoanBalance),
+        monthlyLoanInstalment:   numVal(manual.monthlyLoanInstalment),
+        spouseCpfOaBalance:      numVal(manual.spouseCpfOaBalance),
+        spouseCpfUsedForHousing: numVal(manual.spouseCpfUsedForHousing),
+        hdbFlat:                 null,
       };
       await fetch("/api/myinfo/profile", {
         method: "POST",
@@ -403,13 +411,15 @@ function ManualView({
   onApply:  () => void;
   onSave:   () => void;
 }) {
-  const fields: { key: keyof ManualValues; label: string; placeholder: string }[] = [
-    { key: "cpfOaBalance",           label: "CPF Ordinary Account (OA)",     placeholder: "e.g. 45,000" },
-    { key: "cpfSaBalance",           label: "CPF Special Account (SA)",       placeholder: "e.g. 22,000" },
-    { key: "monthlyContribution",    label: "Monthly CPF Contribution (total)", placeholder: "e.g. 2,340" },
-    { key: "outstandingLoanBalance", label: "Outstanding HDB Loan",           placeholder: "e.g. 85,000" },
-    { key: "monthlyLoanInstalment",  label: "Monthly HDB Instalment",         placeholder: "e.g. 800" },
-    { key: "cpfUsedForHousing",      label: "CPF Used for Housing (total)",   placeholder: "e.g. 80,000" },
+  const fields: { key: keyof ManualValues; label: string; placeholder: string; divider?: boolean }[] = [
+    { key: "cpfOaBalance",            label: "Your CPF Ordinary Account (OA)",        placeholder: "e.g. 45,000" },
+    { key: "cpfUsedForHousing",       label: "Your CPF Used for Housing (total)",      placeholder: "e.g. 80,000" },
+    { key: "cpfSaBalance",            label: "Your CPF Special Account (SA)",          placeholder: "e.g. 22,000" },
+    { key: "monthlyContribution",     label: "Monthly CPF Contribution (your share)",  placeholder: "e.g. 2,340" },
+    { key: "outstandingLoanBalance",  label: "Outstanding HDB Loan",                   placeholder: "e.g. 85,000" },
+    { key: "monthlyLoanInstalment",   label: "Monthly HDB Instalment",                 placeholder: "e.g. 800" },
+    { key: "spouseCpfOaBalance",      label: "Spouse CPF Ordinary Account (OA)",       placeholder: "e.g. 38,000", divider: true },
+    { key: "spouseCpfUsedForHousing", label: "Spouse CPF Used for Housing (total)",    placeholder: "e.g. 60,000" },
   ];
 
   return (
@@ -418,8 +428,13 @@ function ManualView({
         All amounts in SGD. Data stays in your browser unless you save it.
       </p>
       <div className="space-y-2">
-        {fields.map(({ key, label, placeholder }) => (
+        {fields.map(({ key, label, placeholder, divider }) => (
           <div key={key}>
+            {divider && (
+              <div className="pt-1 pb-0.5 border-t border-slate-100">
+                <p className="text-[9px] text-slate-400 uppercase tracking-wide mt-1">Spouse (leave blank if not applicable)</p>
+              </div>
+            )}
             <label className="block text-[10px] text-slate-500 mb-0.5">{label}</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">S$</span>

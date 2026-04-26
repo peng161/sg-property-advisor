@@ -71,8 +71,10 @@ export function parseMyinfoProfile(person: MyinfoPersonData): FinancialProfile {
     cpfMaBalance,
     cpfUsedForHousing,
     monthlyContribution,
-    outstandingLoanBalance: num(flat?.outstandingloanbalance?.value),
-    monthlyLoanInstalment:  num(flat?.monthlyloaninstalment?.value),
+    outstandingLoanBalance:  num(flat?.outstandingloanbalance?.value),
+    monthlyLoanInstalment:   num(flat?.monthlyloaninstalment?.value),
+    spouseCpfOaBalance:      null,
+    spouseCpfUsedForHousing: null,
     hdbFlat,
   };
 }

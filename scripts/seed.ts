@@ -4,10 +4,12 @@
  * Run once:  npm run seed
  *
  * Private data sources (in priority order):
- *   1. URA Maps API (free — register at https://eservice.ura.gov.sg/maps/api/)
- *   2. data/private_transactions.csv  — manual CSV export
- *   3. data.gov.sg quarterly aggregate datasets (demand metrics only)
- *   4. Built-in mock data (22 projects, last resort)
+ *   1. data/private_transactions.csv  — export from data.gov.sg private transactions dataset
+ *   2. data.gov.sg quarterly aggregate datasets (demand metrics only)
+ *   3. Built-in mock data (22 projects, last resort)
+ *
+ * To get individual transaction CSV: search "private residential property transactions"
+ * on data.gov.sg (URA datasets) and download the CSV file to data/private_transactions.csv
  *
  * Optional env vars:
  *   DATA_GOV_SG_API_KEY  — higher rate limits on data.gov.sg CKAN API
@@ -337,10 +339,10 @@ interface PrivateTx {
 // property transactions quarterly", filter by URA. The URL contains the resource_id.
 const DATAGOV_DEMAND_DATASETS: { region: string; resourceId: string }[] = [
   { region: "OCR", resourceId: "d_1a7823f3d31e7db4b426833833762bab" },
-  // Add CCR, RCR, and "ALL" (Whole of Singapore) IDs once discovered:
+  { region: "ALL", resourceId: "d_7c69c943d5f0d89d6a9a773d2b51f337" },
+  // CCR and RCR dataset IDs to add once discovered:
   // { region: "CCR", resourceId: "d_..." },
   // { region: "RCR", resourceId: "d_..." },
-  // { region: "ALL", resourceId: "d_..." },
 ];
 
 // Fetch with retry on 429
@@ -407,79 +409,7 @@ async function fetchPrivateDemandMetrics(): Promise<
   return all;
 }
 
-// URA Maps API — free, register at https://eservice.ura.gov.sg/maps/api/
-// Provides 5 years of individual private property transactions.
-// Set URA_ACCESS_KEY in .env.local with the key from your activation email.
-async function fetchUraTransactions(): Promise<PrivateTx[]> {
-  const accessKey = process.env.URA_ACCESS_KEY;
-  if (!accessKey) return [];
-
-  // Get daily token
-  const tokenRes = await fetch(
-    "https://eservice.ura.gov.sg/uraDataService/insertNewToken/v1",
-    { headers: { AccessKey: accessKey }, signal: AbortSignal.timeout(15000) }
-  );
-  const tokenJson = await tokenRes.json() as { Status: string; Result: string; Message?: string };
-  if (tokenJson.Status !== "Success") {
-    console.log(`  URA token error: ${tokenJson.Message ?? tokenJson.Status}`);
-    return [];
-  }
-  const token = tokenJson.Result;
-
-  const condoTypes = new Set(["Condominium", "Apartment", "Executive Condominium"]);
-  const all: PrivateTx[] = [];
-  const cutoffYear = CURRENT_YEAR - 5;
-
-  // 4 batches by postal district: 01-07, 08-14, 15-21, 22-28
-  for (let batch = 1; batch <= 4; batch++) {
-    process.stdout.write(`  URA batch ${batch}/4… `);
-    try {
-      const res = await fetch(
-        `https://eservice.ura.gov.sg/uraDataService/invokeUraDS/v1?service=PMI_Resi_Transaction&batch=${batch}`,
-        { headers: { AccessKey: accessKey, Token: token }, signal: AbortSignal.timeout(30000) }
-      );
-      type UraProject = {
-        project: string; street: string; marketSegment: string;
-        transaction: { contractDate: string; area: string; price: string; propertyType: string; tenure: string; district: string }[];
-      };
-      const json = await res.json() as { Status: string; Result: UraProject[] };
-      if (json.Status !== "Success" || !Array.isArray(json.Result)) { console.log("no data"); continue; }
-
-      let count = 0;
-      for (const proj of json.Result) {
-        const seg = (proj.marketSegment ?? "OCR").toUpperCase();
-        for (const tx of proj.transaction ?? []) {
-          if (!condoTypes.has(tx.propertyType)) continue;
-          const price = Number(tx.price);
-          const sqm   = Number(tx.area);
-          if (!price || !sqm) continue;
-          const yy = tx.contractDate.slice(0, 2);
-          const mm = tx.contractDate.slice(2, 4);
-          const year = Number(yy) < 50 ? `20${yy}` : `19${yy}`;
-          if (Number(year) < cutoffYear) continue;
-          all.push({
-            project:       proj.project,
-            street:        proj.street,
-            district:      tx.district,
-            marketSegment: seg === "CCR" ? "CCR" : seg === "RCR" ? "RCR" : "OCR",
-            tenure:        parseTenure(tx.tenure),
-            price, sqm,
-            pricePerSqm:   Math.round(price / sqm),
-            contractDate:  `${year}-${mm}`,
-          });
-          count++;
-        }
-      }
-      console.log(`${count} txs`);
-    } catch (e) {
-      console.log(`failed: ${e}`);
-    }
-    await sleep(1000);
-  }
-  return all;
-}
-
-// CSV fallback — reads data/private_transactions.csv if present.
+// CSV loader — reads data/private_transactions.csv if present.
 // Columns (any order, case-insensitive): project, street, district, market_segment, tenure, price, sqm, contract_date
 function loadPrivateCsv(): PrivateTx[] {
   const csvPath = path.join(process.cwd(), "data", "private_transactions.csv");
@@ -513,21 +443,15 @@ function loadPrivateCsv(): PrivateTx[] {
   return results;
 }
 
-// Priority: URA Maps API → CSV → mock
+// Priority: CSV → mock
+// To get real data: download the "Private Residential Property Transactions" CSV
+// from data.gov.sg (search URA private transactions) → save to data/private_transactions.csv
 async function getPrivateTxs(): Promise<PrivateTx[]> {
-  if (process.env.URA_ACCESS_KEY) {
-    console.log("  URA_ACCESS_KEY found — fetching live private transactions…");
-    const ura = await fetchUraTransactions();
-    if (ura.length > 0) return ura;
-    console.log("  URA fetch returned 0 results — falling back to CSV/mock");
-  }
-
   const csv = loadPrivateCsv();
   if (csv.length > 0) return csv;
 
-  console.log("  No URA_ACCESS_KEY and no CSV — using built-in mock data (22 projects).");
-  console.log("  For real data: add URA_ACCESS_KEY to .env.local");
-  console.log("  Register free at: https://eservice.ura.gov.sg/maps/api/");
+  console.log("  No CSV found — using built-in mock data (22 projects).");
+  console.log("  For real data: download from data.gov.sg → save to data/private_transactions.csv");
   return PRIVATE_MOCK_TRANSACTIONS.map((t) => ({
     project: t.project, street: t.street, district: t.district,
     marketSegment: t.marketSegment, tenure: t.tenure,
