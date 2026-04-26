@@ -5,8 +5,8 @@
  * Run: npm run seed:condos
  *
  * Writes to:
- *   private_property_master     — confidence_score >= 3  (used by the app)
- *   private_property_candidates — confidence_score == 2  (needs manual review)
+ *   private_property_master     — confidence_score >= 4  (used by the app)
+ *   private_property_candidates — confidence_score 2–3   (needs manual review)
  *
  * No hardcoded project names — discovery is purely keyword + scoring.
  */
@@ -34,21 +34,39 @@ const SEARCH_KEYWORDS = [
 
 // ── Classification rules ──────────────────────────────────────────────────────
 
-const REJECT_TERMS = [
-  "HDB", "HOUSING BOARD", "SCHOOL", "MALL", "PLAZA", "INDUSTRIAL",
-  "FACTORY", "WAREHOUSE", "CHURCH", "TEMPLE", "MOSQUE", "CLINIC",
-  "HOSPITAL", "COMMUNITY CENTRE", "OFFICE", "BUILDING", "CENTRE",
+// Reject on exact phrase match — strong non-residential signals only.
+// Generic words like garden/lake/bay/park are NOT rejected here;
+// valid condos are often named after them.
+const REJECT_PHRASES = [
+  "GARDENS BY THE BAY",
+  "MRT STATION", "MRT EXIT", "STATION EXIT",
+  "BUS STOP",
+  "AVENUE TOWARDS", "ROAD TOWARDS",
+  "EXPRESSWAY", "PARK CONNECTOR",
+  "NATURE RESERVE",
+  "SCHOOL", "HOSPITAL", "CLINIC",
+  "CHURCH", "TEMPLE", "MOSQUE",
+  "COMMUNITY CENTRE",
+  "INDUSTRIAL", "WAREHOUSE", "FACTORY",
 ] as const;
 
-const LANDED_TERMS = [
-  "TERRACE", "SEMI-DETACHED", "DETACHED", "BUNGALOW", "GCB", "LANDED",
-] as const;
+// ERP is short so we use whole-word matching (\bERP\b) in classify().
 
-// +3 if any of these appear in building+address
+// +4 — definitive condo / EC type identifier in the name
 const HIGH_CONF_TERMS = [
   "EXECUTIVE CONDOMINIUM", "CONDOMINIUM", "CONDO",
-  "APARTMENT", "RESIDENCES", "SUITES",
+  "APARTMENT", "RESIDENCES", "RESIDENCE", "SUITES",
 ] as const;
+
+// +1 — common residential branding words (whole-word match)
+const BRANDING_WORDS = [
+  "PARC", "PARK", "VIEW", "HEIGHTS", "HILL", "CREST", "GREEN", "GARDENS",
+  "VALLEY", "BAY", "SHORE", "TOWERS", "GROVE", "LOFT", "CASA", "COURT",
+  "POINT", "PLACE", "MANSION", "TREES", "LAKE",
+] as const;
+
+// Road/infrastructure name suffix pattern — used to exclude pure address strings
+const ROAD_SUFFIX_RE = /\b(AVENUE|ROAD|STREET|DRIVE|CRESCENT|WALK|WAY|LANE|CLOSE|LINK|FLYOVER|HIGHWAY|BOULEVARD|RING)\s*\d*$/;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,16 +113,14 @@ export function classify(
   const a     = address.toUpperCase().trim();
   const combo = `${b} ${a}`;
 
-  // ── Hard rejects ─────────────────────────────────────────────────────────
-  for (const term of REJECT_TERMS) {
-    if (combo.includes(term)) {
-      return { bucket: "reject", score: 0, reason: `reject: "${term}"`, projectName: rawBuilding, propertyType: "Condo" };
+  // ── Hard rejects — specific non-residential phrases only ─────────────────
+  for (const phrase of REJECT_PHRASES) {
+    if (combo.includes(phrase)) {
+      return { bucket: "reject", score: 0, reason: `reject: "${phrase}"`, projectName: rawBuilding, propertyType: "Condo" };
     }
   }
-  for (const term of LANDED_TERMS) {
-    if (combo.includes(term)) {
-      return { bucket: "reject", score: 0, reason: `landed: "${term}"`, projectName: rawBuilding, propertyType: "Condo" };
-    }
+  if (/\bERP\b/.test(combo)) {
+    return { bucket: "reject", score: 0, reason: 'reject: "ERP"', projectName: rawBuilding, propertyType: "Condo" };
   }
 
   // ── Positive scoring ──────────────────────────────────────────────────────
@@ -112,49 +128,48 @@ export function classify(
   const reasons: string[] = [];
   let isEC = false;
 
-  // +3 if contains a strong condo/residences indicator
+  // +4 definitive condo / EC identifier in the name
   for (const term of HIGH_CONF_TERMS) {
     if (combo.includes(term)) {
-      score += 3;
-      reasons.push(`+3 "${term}"`);
+      score += 4;
+      reasons.push(`+4 "${term}"`);
       if (term === "EXECUTIVE CONDOMINIUM") isEC = true;
-      break; // count only once
+      break;
     }
   }
 
-  // +2 if BUILDING is a proper named project (not a block or road reference)
-  const isNamed =
-    rawBuilding.length > 0 &&
-    !/^(BLK|BLOCK)\s*\d/i.test(rawBuilding) &&
-    !/^\d/.test(rawBuilding) &&
-    /[A-Za-z]{3,}/.test(rawBuilding);
-
-  if (isNamed) {
-    score += 2;
-    reasons.push("+2 named project");
-  }
-
-  // +1 if name has 2–4 words (typical residential project pattern)
-  const wordCount = b.split(/\s+/).filter(Boolean).length;
-  if (wordCount >= 2 && wordCount <= 4) {
-    score += 1;
-    reasons.push("+1 2-4 words");
-  }
-
-  // +1 if valid Singapore postal code + coordinates
+  // +2 named residential project: BUILDING exists, valid postal + coords,
+  //    2–5 words, not a block reference, not starting with a digit, not a road name
   const cleanPostal = postal.replace(/\D/g, "");
-  if (cleanPostal.length === 6 && lat && lng) {
-    score += 1;
-    reasons.push("+1 postal+coords");
+  if (rawBuilding.length > 0 && cleanPostal.length === 6 && lat && lng) {
+    const wordCount       = b.split(/\s+/).filter(Boolean).length;
+    const isBuildingBlock = /^(BLK|BLOCK)\s*\d/i.test(rawBuilding);
+    const startsWithDigit = /^\d/.test(rawBuilding);
+    const isRoadName      = ROAD_SUFFIX_RE.test(b);
+
+    if (!isBuildingBlock && !startsWithDigit && !isRoadName && wordCount >= 2 && wordCount <= 5) {
+      score += 2;
+      reasons.push("+2 named project");
+    }
+  }
+
+  // +1 residential branding word (whole-word match, count only first hit)
+  for (const word of BRANDING_WORDS) {
+    if (new RegExp(`\\b${word}\\b`).test(b)) {
+      score += 1;
+      reasons.push(`+1 branding "${word}"`);
+      break;
+    }
   }
 
   const projectName   = rawBuilding || address.split(" ").slice(0, 4).join(" ");
   const propertyType: "Condo" | "EC" = isEC ? "EC" : "Condo";
   const reasonStr     = reasons.join(", ") || "no positive signals";
 
+  // score >= 4 → master, 2–3 → candidate, < 2 → reject
   if (score < 2)  return { bucket: "reject",    score, reason: `score ${score}: ${reasonStr}`, projectName, propertyType };
-  if (score === 2) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
-  return                 { bucket: "master",     score, reason: reasonStr,                       projectName, propertyType };
+  if (score <= 3) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
+  return                  { bucket: "master",    score, reason: reasonStr,                       projectName, propertyType };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -367,8 +382,8 @@ async function main() {
 
   console.log("\n══ Seed Report ══════════════════════════════════════════════════");
   console.log(`  Total raw OneMap results : ${grandTotalRaw.toLocaleString()}`);
-  console.log(`  Accepted  (master ≥3)   : ${dedupedMasters.length.toLocaleString()} this run`);
-  console.log(`  Candidate (score =2)    : ${dedupedCandidates.length.toLocaleString()} this run`);
+  console.log(`  Accepted  (master ≥4)   : ${dedupedMasters.length.toLocaleString()} this run`);
+  console.log(`  Candidate (score 2–3)   : ${dedupedCandidates.length.toLocaleString()} this run`);
   console.log(`  Rejected  (score <2)    : ${grandRejected.toLocaleString()}`);
   console.log(`  DB master  total         : ${masterTotal.toLocaleString()}`);
   console.log(`  DB candidate total       : ${candidateTotal.toLocaleString()}`);
