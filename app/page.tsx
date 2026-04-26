@@ -133,6 +133,13 @@ export default function Home() {
         </Link>
       </section>
 
+      {/* Footer */}
+      <footer className="text-center pb-8">
+        <Link href="/admin" className="text-[10px] text-neutral-400 hover:text-neutral-600 transition-colors">
+          Admin
+        </Link>
+      </footer>
+
     </main>
   );
 }

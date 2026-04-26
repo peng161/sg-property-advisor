@@ -2,13 +2,14 @@ import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 
-// Turbopack may set cwd() to the monorepo root (first-app/) instead of the
-// Next.js project dir (sg-property-advisor/). Try both paths.
+// SQLITE_DB_PATH env var is the authoritative source (set in .env.local).
+// Falls back to cwd-relative paths to handle Turbopack workspace-root ambiguity.
 export const LOCAL_DB_PATH = (() => {
   const candidates = [
+    process.env.SQLITE_DB_PATH,
     path.join(process.cwd(), "data", "sg-property.db"),
     path.join(process.cwd(), "sg-property-advisor", "data", "sg-property.db"),
-  ];
+  ].filter(Boolean) as string[];
   return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
 })();
 
