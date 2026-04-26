@@ -121,26 +121,21 @@ function popupHtml(rank: number, p: ExtendedProjectSummary): string {
 
 function legendHtml(): string {
   const items = [
-    { color: C.indigo,   label: "Your Home" },
-    { color: C.emerald,  label: "Top Ranked" },
-    { color: C.indigo,   label: "Recommended" },
-    { color: C.violet,   label: "Selected" },
-    { color: "#94a3b8",  label: "Condo nearby" },
-    { color: C.emerald,  label: "EC nearby" },
+    { color: C.indigo,  label: "Home" },
+    { color: C.emerald, label: "Top/Condo" },
+    { color: C.violet,  label: "Selected" },
+    { color: "#059669", label: "EC" },
   ];
   return `
     <div style="
-      background:${C.bg};border:1px solid ${C.border};border-radius:10px;
-      padding:8px 10px;font-family:system-ui,sans-serif;
-      box-shadow:0 1px 4px rgba(0,0,0,.1);min-width:120px;
+      background:rgba(248,250,252,.92);border:1px solid ${C.border};border-radius:8px;
+      padding:5px 7px;font-family:system-ui,sans-serif;
+      box-shadow:0 1px 4px rgba(0,0,0,.1);
     ">
-      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${C.muted};margin-bottom:6px;">
-        Legend
-      </div>
       ${items.map(({ color, label }) => `
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-          <span style="font-size:10px;color:${C.text};">${label}</span>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+          <span style="font-size:9px;color:${C.muted};">${label}</span>
         </div>
       `).join("")}
     </div>
@@ -322,7 +317,7 @@ export default function LeafletMap({
         if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
 
         const isEC  = c.property_category === "EC";
-        const color = isEC ? C.emerald : "#94a3b8";
+        const color = isEC ? "#059669" : C.emerald;
         const icon  = L.divIcon({
           className:  "",
           iconSize:   [22, 22],
