@@ -70,7 +70,8 @@ export interface ScoredHdbRecord extends HdbResaleRecord {
 export async function getHdbNearby(
   lat: number, lng: number, flatType: string, budget: number, limit = 7,
 ): Promise<{ records: ScoredHdbRecord[]; fromDb: boolean }> {
-  const db = getDb();
+  let db;
+  try { db = getDb(); } catch { return { records: [], fromDb: false }; }
   if (!db) return { records: [], fromDb: false };
 
   const { latDelta, lngDelta } = boundingBox(lat);
@@ -135,7 +136,8 @@ function scoreByDistance(distKm: number): number {
 export async function getPrivateProjectsNearby(
   lat: number, lng: number, _budget: number, limit = 15,
 ): Promise<{ projects: ExtendedProjectSummary[]; fromDb: boolean; count: number }> {
-  const db = getDb();
+  let db;
+  try { db = getDb(); } catch { return { projects: [], fromDb: false, count: 0 }; }
   if (!db) return { projects: [], fromDb: false, count: 0 };
 
   const hasCoords = lat > 0 && lng > 0;
@@ -188,7 +190,8 @@ export async function getPrivateProjectsNearby(
 export async function getHdbByTown(
   town: string, flatType: string, limit = 12,
 ): Promise<{ records: HdbResaleRecord[]; fromDb: boolean }> {
-  const db = getDb();
+  let db;
+  try { db = getDb(); } catch { return { records: [], fromDb: false }; }
   if (!db) return { records: [], fromDb: false };
 
   try {

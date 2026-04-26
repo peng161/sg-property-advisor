@@ -20,8 +20,12 @@ export function getDb(): Client | null {
 
   // Local file takes priority — lets dev work without pushing to Turso
   if (fs.existsSync(LOCAL_DB_PATH)) {
-    _client = createClient({ url: `file:${LOCAL_DB_PATH}` });
-    return _client;
+    try {
+      _client = createClient({ url: `file:${LOCAL_DB_PATH}` });
+      return _client;
+    } catch {
+      // fall through to Turso
+    }
   }
 
   // Fallback: Turso cloud (production / Vercel)
@@ -29,8 +33,12 @@ export function getDb(): Client | null {
   const tursoUrl   = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
   if (tursoUrl && tursoToken) {
-    _client = createClient({ url: tursoUrl, authToken: tursoToken });
-    return _client;
+    try {
+      _client = createClient({ url: tursoUrl, authToken: tursoToken });
+      return _client;
+    } catch {
+      return null;
+    }
   }
 
   return null;
