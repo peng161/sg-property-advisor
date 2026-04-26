@@ -92,6 +92,8 @@ function computeOptionScore(
   return Math.min(Math.round(s), 99);
 }
 
+export const dynamic = "force-dynamic";
+
 // ── PageProps ─────────────────────────────────────────────────────────────────
 
 interface PageProps {
@@ -101,6 +103,7 @@ interface PageProps {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function ResultsPage({ searchParams }: PageProps) {
+  try {
   const params = await searchParams;
 
   const numChildren = Number(params.numChildren ?? 0);
@@ -413,4 +416,17 @@ export default async function ResultsPage({ searchParams }: PageProps) {
       resultsReturnUrl={resultsReturnUrl}
     />
   );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return (
+      <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="max-w-lg w-full bg-white rounded-2xl border border-red-200 p-8 shadow-sm">
+          <h1 className="text-lg font-bold text-red-600 mb-2">Something went wrong</h1>
+          <p className="text-slate-500 text-sm mb-4">The results page encountered an error. Please try again or go back and resubmit.</p>
+          <pre className="bg-slate-50 rounded-lg p-3 text-xs text-slate-700 overflow-auto whitespace-pre-wrap border border-slate-200">{msg}</pre>
+          <a href="/" className="mt-4 inline-block text-sm text-indigo-600 hover:underline">← Back to home</a>
+        </div>
+      </main>
+    );
+  }
 }
