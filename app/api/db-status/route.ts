@@ -10,9 +10,19 @@ export async function GET(req: Request) {
   const lat  = parseFloat(url.searchParams.get("lat")  ?? "0");
   const lng  = parseFloat(url.searchParams.get("lng")  ?? "0");
 
+  const tursoUrl   = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
+
   const db = getDb();
   if (!db) {
-    return Response.json({ connected: false, hdbCount: 0, privateCount: 0, condosNearby: 0 });
+    return Response.json({
+      connected: false, hdbCount: 0, privateCount: 0, condosNearby: 0,
+      debug: {
+        hasTursoUrl:   !!tursoUrl,
+        hasTursoToken: !!tursoToken,
+        tursoUrl:      tursoUrl ?? null,
+      },
+    });
   }
 
   try {
@@ -28,13 +38,17 @@ export async function GET(req: Request) {
       const nearby = await db.execute(
         "SELECT lat, lng FROM private_property_master WHERE lat > 0 AND lng > 0"
       );
-      condosNearby = nearby.rows.filter((r) => {
-        return haversineKm(lat, lng, n(r.lat), n(r.lng)) <= 1.5;
-      }).length;
+      condosNearby = nearby.rows.filter((r) =>
+        haversineKm(lat, lng, n(r.lat), n(r.lng)) <= 1.5
+      ).length;
     }
 
     return Response.json({ connected: true, hdbCount, privateCount, condosNearby });
-  } catch {
-    return Response.json({ connected: false, hdbCount: 0, privateCount: 0, condosNearby: 0 });
+  } catch (err) {
+    return Response.json({
+      connected: false, hdbCount: 0, privateCount: 0, condosNearby: 0,
+      error: err instanceof Error ? err.message : String(err),
+      debug: { hasTursoUrl: !!tursoUrl, hasTursoToken: !!tursoToken },
+    });
   }
 }

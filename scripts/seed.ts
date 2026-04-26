@@ -1,20 +1,21 @@
 /**
- * Seed script — pulls HDB resale data from data.gov.sg and writes to Turso.
+ * Seed script — downloads HDB resale CSV from data.gov.sg and writes to Turso.
  *
- * Run once:  npm run seed
- *
- * For private condo data, run:  npm run seed:condos
+ * Run: npm run seed:hdb
  *
  * Required env vars (in .env.local):
  *   TURSO_DATABASE_URL   — libsql://... URL from Turso dashboard
  *   TURSO_AUTH_TOKEN     — Turso auth token
- *
- * Optional:
- *   DATA_GOV_SG_API_KEY  — higher rate limits on data.gov.sg CKAN API
  */
 
 import { config } from "dotenv";
-config({ path: ".env.local" });
+import path from "path";
+
+// Try both cwd and parent dir to handle workspace-root ambiguity
+for (const p of [".env.local", path.join("sg-property-advisor", ".env.local")]) {
+  const r = config({ path: p });
+  if (!r.error) { console.log(`Loaded env from: ${p}`); break; }
+}
 
 import { createClient } from "@libsql/client";
 
@@ -27,6 +28,8 @@ const db = createClient({
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const DATASET_ID   = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+const POLL_URL     = `https://api-open.data.gov.sg/v1/public/api/datasets/${DATASET_ID}/poll-download`;
 const CURRENT_YEAR = new Date().getFullYear();
 const START_YEAR   = CURRENT_YEAR - 5;
 const CHUNK        = 500;
@@ -82,7 +85,7 @@ async function geocodeOneMap(query: string): Promise<[number, number] | null> {
   }
 }
 
-async function geocodeBulk(queries: string[], concurrency = 4, delayMs = 400) {
+async function geocodeBulk(queries: string[], concurrency = 6, delayMs = 250) {
   const out = new Map<string, [number, number] | null>();
   for (let i = 0; i < queries.length; i += concurrency) {
     const batch   = queries.slice(i, i + concurrency);
@@ -95,71 +98,48 @@ async function geocodeBulk(queries: string[], concurrency = 4, delayMs = 400) {
   return out;
 }
 
-// ── HDB fetching ──────────────────────────────────────────────────────────────
+// ── CSV download ──────────────────────────────────────────────────────────────
 
-const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
-const HDB_BATCH_SIZE  = 10_000;
-const HDB_MAX_PAGES   = 50;
-const HDB_MAX_RETRIES = 5;
+interface HdbRow {
+  month:               string;
+  town:                string;
+  flat_type:           string;
+  block:               string;
+  street_name:         string;
+  storey_range:        string;
+  floor_area_sqm:      string;
+  lease_commence_date: string;
+  remaining_lease:     string;
+  resale_price:        string;
+}
 
-interface RawHdb { [key: string]: string }
-
-async function fetchAllHdb(): Promise<RawHdb[]> {
-  const all: RawHdb[] = [];
-  let offset = 0;
-  let page   = 1;
-  let total  = Infinity;
-
-  while (page <= HDB_MAX_PAGES) {
-    const url =
-      `https://data.gov.sg/api/action/datastore_search` +
-      `?resource_id=${HDB_RESOURCE_ID}` +
-      `&limit=${HDB_BATCH_SIZE}` +
-      `&offset=${offset}` +
-      `&sort=month%20desc`;
-
-    type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
-    const hdbApiKey = process.env.DATA_GOV_SG_API_KEY ?? "";
-    const hdbHeaders: Record<string, string> = { Accept: "application/json" };
-    if (hdbApiKey) hdbHeaders["x-api-key"] = hdbApiKey;
-
-    let json: HdbPage | null = null;
-    for (let attempt = 1; attempt <= HDB_MAX_RETRIES; attempt++) {
-      const res = await fetch(url, { signal: AbortSignal.timeout(30000), headers: hdbHeaders });
-      if (res.status === 429) {
-        const wait = Math.min(4000 * 2 ** (attempt - 1), 64000);
-        console.log(`\n    429 — waiting ${wait / 1000}s…`);
-        if (attempt === HDB_MAX_RETRIES) { console.error("  Max retries reached. Stopping."); return all; }
-        await sleep(wait);
-        continue;
-      }
-      if (!res.ok) { console.error(`  Bad response ${res.status}. Stopping.`); return all; }
-      json = await res.json() as HdbPage;
-      break;
-    }
-    if (!json) break;
-
-    const batch = json.result?.records ?? [];
-    if (typeof json.result?.total === "number") total = json.result.total;
-    console.log(`  Page ${page} | offset ${offset} | got ${batch.length} | total ${total === Infinity ? "?" : total}`);
-
-    if (batch.length === 0) { console.log("  Empty page — done."); break; }
-
-    let passedWindow = false;
-    for (const r of batch) {
-      const y = parseInt((r.month ?? "0000").slice(0, 4), 10);
-      if (y < START_YEAR) { passedWindow = true; continue; }
-      if (y <= CURRENT_YEAR) all.push(r);
-    }
-    if (passedWindow) { console.log("  Reached date window start — stopping."); break; }
-    if (offset + batch.length >= total) { console.log("  End of dataset."); break; }
-
-    offset += HDB_BATCH_SIZE;
-    page++;
-    await sleep(hdbApiKey ? 600 : 2700);
+async function fetchCsvUrl(maxPolls = 10): Promise<string> {
+  for (let i = 0; i < maxPolls; i++) {
+    const res  = await fetch(POLL_URL);
+    const json = await res.json() as { code: number; data: { status: string; url?: string } };
+    if (json.data?.status === "DOWNLOAD_SUCCESS" && json.data.url) return json.data.url;
+    console.log(`  Poll ${i + 1}: status=${json.data?.status} — waiting 5s…`);
+    await sleep(5000);
   }
+  throw new Error("Download never became ready after polling");
+}
 
-  return all;
+async function downloadAndParseCsv(csvUrl: string): Promise<HdbRow[]> {
+  console.log("  Downloading CSV…");
+  const res  = await fetch(csvUrl, { signal: AbortSignal.timeout(120_000) });
+  const text = await res.text();
+  const lines = text.split("\n").filter((l) => l.trim());
+  const header = lines[0].split(",");
+
+  const rows: HdbRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = lines[i].split(",");
+    if (vals.length < header.length) continue;
+    const row = Object.fromEntries(header.map((k, j) => [k.trim(), vals[j]?.trim() ?? ""])) as HdbRow;
+    const year = parseInt((row.month ?? "0000").slice(0, 4), 10);
+    if (year >= START_YEAR && year <= CURRENT_YEAR) rows.push(row);
+  }
+  return rows;
 }
 
 // ── Table setup ───────────────────────────────────────────────────────────────
@@ -200,20 +180,21 @@ async function main() {
   await createTables();
   console.log("Tables ready.\n");
 
-  console.log(`Fetching HDB resale data (last 5 years: ${START_YEAR}–${CURRENT_YEAR})…`);
-  const allHdb = await fetchAllHdb();
-  console.log(`\nTotal HDB records in range: ${allHdb.length}\n`);
+  console.log(`Fetching HDB resale CSV (last 5 years: ${START_YEAR}–${CURRENT_YEAR})…`);
+  const csvUrl  = await fetchCsvUrl();
+  const allRows = await downloadAndParseCsv(csvUrl);
+  console.log(`  ${allRows.length} rows in date range\n`);
 
-  const uniqueStreets = [...new Set(allHdb.map((r) => r.street_name as string))];
+  const uniqueStreets = [...new Set(allRows.map((r) => r.street_name))];
   console.log(`Geocoding ${uniqueStreets.length} unique streets…`);
-  const hdbGeo  = await geocodeBulk(uniqueStreets, 8, 200);
+  const hdbGeo   = await geocodeBulk(uniqueStreets, 6, 250);
   const geocoded = [...hdbGeo.values()].filter(Boolean).length;
   console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueStreets.length - geocoded}\n`);
 
-  // Build valid rows
-  const rows: Parameters<typeof db.batch>[0] = [];
-  for (const row of allHdb) {
-    const precise  = hdbGeo.get(row.street_name as string);
+  // Build insert statements
+  const stmts: Parameters<typeof db.batch>[0] = [];
+  for (const row of allRows) {
+    const precise  = hdbGeo.get(row.street_name);
     const town     = (row.town ?? "").toUpperCase().trim();
     const fallback = TOWN_COORDS[town] ?? null;
     const coords   = precise ?? fallback;
@@ -222,35 +203,35 @@ async function main() {
     const sqm   = Number(row.floor_area_sqm);
     if (!price || !sqm) continue;
     const [lat, lng] = coords;
-    rows.push({
+    stmts.push({
       sql: `INSERT OR REPLACE INTO hdb_tx
               (block, street_name, town, flat_type, storey_range, sqm, resale_price,
                price_per_sqm, month, lease_commence_year, remaining_lease, lat, lng)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       args: [
-        row.block, row.street_name, row.town ?? "", row.flat_type,
+        row.block, row.street_name, row.town, row.flat_type,
         row.storey_range, sqm, price, Math.round(price / sqm), row.month,
         Number(row.lease_commence_date) || 0,
-        parseRemainingLease(row.remaining_lease ?? ""),
+        parseRemainingLease(row.remaining_lease),
         lat, lng,
       ],
     });
   }
 
-  console.log(`Writing ${rows.length} rows to Turso in chunks of ${CHUNK}…`);
+  console.log(`Writing ${stmts.length} rows to Turso in chunks of ${CHUNK}…`);
   let written = 0;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    await db.batch(rows.slice(i, i + CHUNK), "write");
-    written += Math.min(CHUNK, rows.length - i);
-    process.stdout.write(`\r  Written: ${written}/${rows.length}`);
+  for (let i = 0; i < stmts.length; i += CHUNK) {
+    await db.batch(stmts.slice(i, i + CHUNK), "write");
+    written += Math.min(CHUNK, stmts.length - i);
+    process.stdout.write(`\r  Written: ${written}/${stmts.length}`);
   }
   process.stdout.write("\n");
 
   const countRes = await db.execute("SELECT COUNT(*) as n FROM hdb_tx");
-  const hdbTotal = Number(countRes.rows[0]?.n ?? 0);
+  const total    = Number(countRes.rows[0]?.n ?? 0);
 
   console.log("\n✓ Seed complete");
-  console.log(`  HDB transactions in Turso : ${hdbTotal.toLocaleString()}`);
+  console.log(`  HDB transactions in Turso : ${total.toLocaleString()}`);
   console.log("\nFor private condo data, run:  npm run seed:condos");
 }
 
