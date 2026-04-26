@@ -1218,7 +1218,7 @@ export default function ResultsDashboard({
             <div className="w-full md:w-80 shrink-0">
               <MapWrapper
                 lat={lat} lng={lng} postalCode={postalCode}
-                properties={displayedListings}
+                properties={[]}
                 selectedProject={selectedProject}
                 onSelectProject={setSelectedProject}
               />

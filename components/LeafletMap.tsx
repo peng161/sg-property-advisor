@@ -273,18 +273,18 @@ export default function LeafletMap({
         const color = isEC ? C.emerald : "#94a3b8"; // slate-400 for condos, emerald for ECs
         const icon  = L.divIcon({
           className:  "",
-          iconSize:   [18, 18],
-          iconAnchor: [9, 9],
+          iconSize:   [22, 22],
+          iconAnchor: [11, 11],
           html: `<div style="
-            width:18px;height:18px;border-radius:50%;
-            background:${color};border:1.5px solid ${C.white};
+            width:22px;height:22px;border-radius:50%;
+            background:${color};border:2px solid ${C.white};
             display:flex;align-items:center;justify-content:center;
-            box-shadow:0 1px 3px rgba(0,0,0,.2);
-            font-size:6px;font-weight:800;color:${C.white};
+            box-shadow:0 1px 4px rgba(0,0,0,.25);
+            font-size:7px;font-weight:800;color:${C.white};
           ">${isEC ? "EC" : "C"}</div>`,
         });
 
-        L.marker([c.lat, c.lng], { icon, zIndexOffset: -100 })
+        L.marker([c.lat, c.lng], { icon })
           .addTo(map)
           .bindPopup(
             `<div style="font-family:system-ui,sans-serif;padding:8px 10px;background:${C.bg};border-radius:10px;">
