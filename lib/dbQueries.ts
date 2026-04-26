@@ -138,6 +138,8 @@ export async function getPrivateProjectsNearby(
   const db = getDb();
   if (!db) return { projects: [], fromDb: false, count: 0 };
 
+  const hasCoords = lat > 0 && lng > 0;
+
   try {
     const result = await db.execute(
       "SELECT project_name, property_category, address, lat, lng FROM onemap_condo WHERE lat > 0 AND lng > 0",
@@ -146,7 +148,9 @@ export async function getPrivateProjectsNearby(
     const scored: ExtendedProjectSummary[] = result.rows.map((row) => {
       const rowLat = n(row.lat);
       const rowLng = n(row.lng);
-      const distKm = Math.round(haversineKm(lat, lng, rowLat, rowLng) * 10) / 10;
+      const distKm = hasCoords
+        ? Math.round(haversineKm(lat, lng, rowLat, rowLng) * 10) / 10
+        : null;
       return {
         project:       s(row.project_name),
         street:        s(row.address),
@@ -159,7 +163,7 @@ export async function getPrivateProjectsNearby(
         latestDate:    "",
         minSqm:        0,
         maxSqm:        0,
-        propertyScore: scoreByDistance(distKm),
+        propertyScore: distKm !== null ? scoreByDistance(distKm) : 50,
         trend3Y:       0,
         distanceKm:    distKm,
         projectLat:    rowLat,
@@ -167,8 +171,10 @@ export async function getPrivateProjectsNearby(
       };
     });
 
-    const within = scored.filter((p) => p.distanceKm !== null && p.distanceKm <= NEARBY_DIST_KM).length;
-    const top    = scored.sort((a, b) => b.propertyScore - a.propertyScore).slice(0, limit);
+    const within = hasCoords
+      ? scored.filter((p) => p.distanceKm !== null && p.distanceKm <= NEARBY_DIST_KM).length
+      : 0;
+    const top = scored.sort((a, b) => b.propertyScore - a.propertyScore).slice(0, limit);
     return { projects: top, fromDb: true, count: within };
   } catch {
     return { projects: [], fromDb: false, count: 0 };

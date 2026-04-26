@@ -225,7 +225,7 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   let dbUsed = false;
   let dbProjectCount = 0;
 
-  if (hasUserCoords && isDbReady()) {
+  if (isDbReady()) {
     const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 30);
     if (fromDb && projects.length > 0) {
       privateListings = projects;
