@@ -1,9 +1,10 @@
-import { createClient, type Client } from "@libsql/client";
+// Use the HTTP-only libsql client for Turso connections — no native binary needed.
+// The full @libsql/client (which loads native SQLite) is only required locally for
+// file-based dev databases. On Vercel/serverless, this import is never reached.
+import { createClient as createHttpClient, type Client } from "@libsql/client/http";
 import path from "path";
 import fs from "fs";
 
-// SQLITE_DB_PATH env var is the authoritative source (set in .env.local).
-// Falls back to cwd-relative paths to handle Turbopack workspace-root ambiguity.
 export const LOCAL_DB_PATH = (() => {
   const candidates = [
     process.env.SQLITE_DB_PATH,
@@ -14,29 +15,38 @@ export const LOCAL_DB_PATH = (() => {
 })();
 
 let _client: Client | null = null;
+let _initError: string | null = null;
+
+export function getDbError(): string | null { return _initError; }
 
 export function getDb(): Client | null {
   if (_client) return _client;
 
-  // Local file takes priority — lets dev work without pushing to Turso
+  // Local SQLite file — only used in local dev (never on Vercel).
+  // Lazy-require the full client so the native binary is never loaded on Vercel.
   if (fs.existsSync(LOCAL_DB_PATH)) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createClient } = require("@libsql/client") as { createClient: typeof createHttpClient };
       _client = createClient({ url: `file:${LOCAL_DB_PATH}` });
+      _initError = null;
       return _client;
-    } catch {
+    } catch (e) {
+      _initError = e instanceof Error ? e.message : String(e);
       // fall through to Turso
     }
   }
 
-  // Fallback: Turso cloud (production / Vercel)
-  // Accepts TURSO_URL or TURSO_DATABASE_URL (name used by Turso dashboard export)
+  // Turso cloud — pure HTTP, no native deps.
   const tursoUrl   = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
   if (tursoUrl && tursoToken) {
     try {
-      _client = createClient({ url: tursoUrl, authToken: tursoToken });
+      _client = createHttpClient({ url: tursoUrl, authToken: tursoToken });
+      _initError = null;
       return _client;
-    } catch {
+    } catch (e) {
+      _initError = e instanceof Error ? e.message : String(e);
       return null;
     }
   }

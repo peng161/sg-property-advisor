@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/sqlite";
+import { getDb, getDbError } from "@/lib/sqlite";
 import { haversineKm } from "@/lib/dbQueries";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,7 @@ export async function GET(req: Request) {
         hasTursoUrl:   !!tursoUrl,
         hasTursoToken: !!tursoToken,
         tursoUrl:      tursoUrl ?? null,
+        initError:     getDbError() ?? null,
       },
     });
   }
