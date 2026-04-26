@@ -56,8 +56,6 @@ export interface DebugInfo {
   privateSource:          string;
   hdbSource:              string;
   dbReady:                boolean;
-  dbPath?:                string;
-  serverCwd?:             string;
 }
 
 export interface DashboardProps {
@@ -625,7 +623,6 @@ export default function ResultsDashboard({
   // Filter state
   const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
   const [tenureFilter, setTenureFilter] = useState<"All" | "99yr" | "999yr" | "Freehold">("All");
-  const [showDebug, setShowDebug] = useState(false);
 
   // Upgrade path card state
   const [selectedUpgrade, setSelectedUpgrade] = useState(assessment.recommendation);
@@ -966,39 +963,42 @@ export default function ResultsDashboard({
             </div>
             <p className="text-[9px] text-slate-400 mt-3">Last updated: {today}</p>
 
-            {/* Debug toggle */}
-            <button
-              onClick={() => setShowDebug((v) => !v)}
-              className="mt-2 text-[9px] text-slate-300 hover:text-slate-500 transition-colors w-full text-left py-0.5"
-            >
-              {showDebug ? "▾" : "▸"} Debug Panel
-            </button>
+            {/* Data status panel */}
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5 space-y-1.5 text-[10px]">
+              <p className="font-semibold text-slate-500 uppercase tracking-wide text-[8px] mb-1">Data Status</p>
 
-            {showDebug && (
-              <div className="mt-1 bg-slate-50 rounded-lg p-2.5 text-[9px] text-slate-500 space-y-1 border border-slate-200">
-                <p className="font-bold text-slate-600 text-[10px] mb-1.5">Debug Info</p>
-                {[
-                  ["Postal Code", debugInfo.postalCode || "—"],
-                  ["Lat/Lng", debugInfo.lat ? `${debugInfo.lat.toFixed(5)}, ${debugInfo.lng.toFixed(5)}` : "Not geocoded"],
-                  ["Lease Commence Year", debugInfo.leaseKnown ? `${debugInfo.leaseCommencementYear}` : "Unknown"],
-                  ["Remaining Lease", debugInfo.leaseKnown ? `${debugInfo.remainingLease} yrs` : "95 yrs (defaulted)"],
-                  ["Recent Txns (live API, your town)", `${debugInfo.hdbTxCount}`],
-                  ["HDB Rows in DB", debugInfo.dbReady ? `${debugInfo.hdbDbCount.toLocaleString()}` : "—"],
-                  ["Seeded Condos in DB", debugInfo.dbReady ? `${debugInfo.privateDbCount.toLocaleString()}` : "— run npm run seed:condos"],
-                  ["Condos within 1.5 km", debugInfo.dbReady ? `${debugInfo.dbProjectsWithin1_5km}` : "N/A"],
-                  ["Private Source", debugInfo.privateSource],
-                  ["HDB Source", debugInfo.hdbSource],
-                  ["SQLite DB", debugInfo.dbReady ? "Ready" : "Not seeded — run npm run seed"],
-                  ["DB Path", debugInfo.dbPath ?? "—"],
-                  ["Server CWD", debugInfo.serverCwd ?? "—"],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between gap-1 leading-tight">
-                    <span className="text-slate-400 shrink-0">{k}</span>
-                    <span className="text-slate-600 font-medium text-right break-all">{v}</span>
-                  </div>
-                ))}
+              {/* DB connection */}
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${debugInfo.dbReady ? "bg-emerald-500" : "bg-red-400"}`} />
+                <span className="text-slate-600 font-medium">
+                  {debugInfo.dbReady ? "Local DB connected" : "Local DB not found"}
+                </span>
               </div>
-            )}
+
+              {/* HDB rows */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">HDB records</span>
+                <span className="font-semibold text-slate-700">
+                  {debugInfo.dbReady ? debugInfo.hdbDbCount.toLocaleString() : "—"}
+                </span>
+              </div>
+
+              {/* Condo rows */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Condos seeded</span>
+                <span className="font-semibold text-slate-700">
+                  {debugInfo.dbReady ? debugInfo.privateDbCount.toLocaleString() : "—"}
+                </span>
+              </div>
+
+              {/* Nearby condos */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Condos within 1.5 km</span>
+                <span className="font-semibold text-slate-700">
+                  {debugInfo.dbReady ? debugInfo.dbProjectsWithin1_5km : "—"}
+                </span>
+              </div>
+            </div>
           </div>
         </aside>
 
