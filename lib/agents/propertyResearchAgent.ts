@@ -1,11 +1,8 @@
-// Research agent: finds current PSF estimates for a Singapore condo.
-// Fast path: query our seeded private_project table (URA data, High confidence).
-// Slow path: Claude Opus 4.7 with tool_use to fetch public portal pages.
+// Research agent: fetches public portal pages to estimate current PSF for a Singapore condo.
+// Only called when the project is not in our seeded private_project_price_estimates table.
+// Uses Claude Opus 4.7 with tool_use (fetch_page).
 
 import Anthropic from "@anthropic-ai/sdk";
-import { getDb } from "@/lib/sqlite";
-
-const PSF_PER_PSM = 10.7639; // 1 sqm = 10.7639 sqft
 
 export interface ResearchResult {
   project_name:       string;
@@ -17,52 +14,6 @@ export interface ResearchResult {
   sources:            string[];
   notes:              string[];
   checked_at:         string;
-}
-
-// ── Fast path: DB lookup from seeded private_project table ────────────────────
-
-async function lookupFromDb(projectName: string): Promise<ResearchResult | null> {
-  const db = getDb();
-  if (!db) return null;
-  try {
-    let res = await db.execute({
-      sql: "SELECT * FROM private_project WHERE UPPER(project) = UPPER(?) LIMIT 1",
-      args: [projectName],
-    });
-    if (!res.rows.length) {
-      res = await db.execute({
-        sql: "SELECT * FROM private_project WHERE UPPER(project) LIKE UPPER(?) ORDER BY tx_count DESC LIMIT 1",
-        args: [`%${projectName}%`],
-      });
-    }
-    if (!res.rows.length) return null;
-
-    const row = res.rows[0];
-    const medPsm = Number(row.median_psm);
-    if (!medPsm) return null;
-
-    const medPsf  = Math.round(medPsm / PSF_PER_PSM);
-    const trend3y = Number(row.trend_3y) || 0;
-    const spread  = trend3y > 15 ? 0.10 : 0.07;
-
-    return {
-      project_name:       String(row.project),
-      estimated_psf_low:  Math.round(medPsf * (1 - spread)),
-      estimated_psf_mid:  medPsf,
-      estimated_psf_high: Math.round(medPsf * (1 + spread)),
-      confidence:  "High",
-      price_basis: `URA transaction records (${Number(row.tx_count)} transactions, latest: ${String(row.latest_date)})`,
-      sources:     ["sg-property DB (URA data via data.gov.sg)"],
-      notes: [
-        `${Number(row.tx_count)} transactions in database.`,
-        `3-year price trend: ${trend3y > 0 ? "+" : ""}${trend3y.toFixed(1)}%.`,
-        `Segment: ${String(row.market_segment)}. Tenure: ${String(row.tenure)}.`,
-      ],
-      checked_at: new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
 }
 
 // ── Fetch helper for agent tools ──────────────────────────────────────────────
@@ -223,7 +174,5 @@ export async function runPropertyResearchAgent(
   unitType:    string,
   targetPsf:   number,
 ): Promise<ResearchResult> {
-  const dbResult = await lookupFromDb(projectName);
-  if (dbResult) return dbResult;
   return runClaudeAgent(projectName, unitType, targetPsf);
 }

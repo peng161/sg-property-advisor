@@ -191,6 +191,22 @@ function openDb(): Database.Database {
       UNIQUE(quarter, region, type_of_sale, sale_status)
     );
     CREATE INDEX IF NOT EXISTS idx_pdm_quarter ON private_demand_metrics(quarter);
+
+    CREATE TABLE IF NOT EXISTS private_project_price_estimates (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name       TEXT NOT NULL,
+      unit_type          TEXT NOT NULL DEFAULT 'any',
+      estimated_psf_low  REAL,
+      estimated_psf_mid  REAL,
+      estimated_psf_high REAL,
+      confidence         TEXT,
+      price_basis        TEXT,
+      sources_json       TEXT,
+      notes_json         TEXT,
+      checked_at         TEXT,
+      created_at         TEXT,
+      UNIQUE(project_name, unit_type)
+    );
   `);
   return db;
 }
@@ -597,6 +613,52 @@ async function main() {
     console.log(`  Done: ${privOk} projects written\n`);
   }
 
+  // ── PSF estimates: derive from private_project ────────────────────────────
+  console.log("Computing PSF estimates from private_project…");
+  const PSF_PER_PSM = 10.7639;
+  const allProjects = db.prepare("SELECT * FROM private_project").all() as {
+    project: string; market_segment: string; tenure: string;
+    median_psm: number; trend_3y: number; tx_count: number; latest_date: string;
+  }[];
+
+  const insertPsf = db.prepare(`
+    INSERT OR REPLACE INTO private_project_price_estimates
+      (project_name, unit_type, estimated_psf_low, estimated_psf_mid, estimated_psf_high,
+       confidence, price_basis, sources_json, notes_json, checked_at, created_at)
+    VALUES (?, 'any', ?, ?, ?, 'High', ?, ?, ?, ?, ?)
+  `);
+
+  const seedPsf = db.transaction(() => {
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const row of allProjects) {
+      const medPsm = Number(row.median_psm);
+      if (!medPsm) continue;
+      const medPsf  = Math.round(medPsm / PSF_PER_PSM);
+      const trend3y = Number(row.trend_3y) || 0;
+      const spread  = trend3y > 15 ? 0.10 : 0.07;
+      insertPsf.run(
+        row.project,
+        Math.round(medPsf * (1 - spread)),
+        medPsf,
+        Math.round(medPsf * (1 + spread)),
+        `URA transaction records (${Number(row.tx_count)} transactions, latest: ${row.latest_date})`,
+        JSON.stringify(["sg-property DB (URA data via data.gov.sg)"]),
+        JSON.stringify([
+          `${Number(row.tx_count)} transactions in database.`,
+          `3-year price trend: ${trend3y > 0 ? "+" : ""}${trend3y.toFixed(1)}%.`,
+          `Segment: ${row.market_segment}. Tenure: ${row.tenure}.`,
+        ]),
+        now, now,
+      );
+      count++;
+    }
+    return count;
+  });
+
+  const psfCount = seedPsf();
+  console.log(`  PSF estimates written: ${psfCount}\n`);
+
   const hdbCount  = (db.prepare("SELECT COUNT(*) as n FROM hdb_tx").get() as { n: number }).n;
   const privCount = (db.prepare("SELECT COUNT(*) as n FROM private_project").get() as { n: number }).n;
   db.close();
@@ -604,6 +666,7 @@ async function main() {
   console.log("✓  Seed complete");
   console.log(`   HDB transactions:  ${hdbCount.toLocaleString()}`);
   console.log(`   Private projects:  ${privCount.toLocaleString()}`);
+  console.log(`   PSF estimates:     ${psfCount.toLocaleString()}`);
   console.log(`   Database:          ${DB_PATH}`);
 }
 

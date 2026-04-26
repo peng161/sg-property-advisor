@@ -9,7 +9,8 @@ import type { FinancialProfile } from "@/lib/myinfo/types";
 import FinancialProfilePanel from "./FinancialProfilePanel";
 import UpgradeScorePanel from "./UpgradeScorePanel";
 
-const LeafletMap = dynamic(() => import("./LeafletMap"), { ssr: false });
+const LeafletMap      = dynamic(() => import("./LeafletMap"),      { ssr: false });
+const NearbyCondoMap  = dynamic(() => import("./NearbyCondoMap"),  { ssr: false });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -616,6 +617,8 @@ export default function ResultsDashboard({
 
   const defaultBr = defaultBrFromChildren(numChildren);
 
+  const hasCoords = lat > 0 && lng > 0;
+
   // Private Condo listings — filtered by tenure, capped at 7
   const displayedListings = selectedUpgrade === "Private Condo"
     ? privateListings.filter((p) => {
@@ -1215,6 +1218,20 @@ export default function ResultsDashboard({
               financialProfile={initialFinancialProfile}
             />
           </section>
+
+          {/* ── Section 4: Nearby Private Condos / ECs ── */}
+          {hasCoords && (
+            <section className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">4</div>
+                <div>
+                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Nearby Private Condos &amp; ECs</h2>
+                  <p className="text-xs text-slate-400">All private residential projects geocoded within your chosen radius</p>
+                </div>
+              </div>
+              <NearbyCondoMap lat={lat} lng={lng} />
+            </section>
+          )}
 
           {/* Footer */}
           <div className="flex justify-between text-[9px] text-slate-400 pt-2 border-t border-slate-200 pb-6">

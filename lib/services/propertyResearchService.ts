@@ -1,54 +1,33 @@
-// Caching layer for property PSF research.
-// Checks Turso/SQLite for a cached estimate (7-day TTL) before calling the agent.
+// PSF research service.
+// Primary: queries private_project_price_estimates (pre-seeded by npm run seed).
+// Fallback: Claude agent fetches public portal pages, then saves result to DB.
 
 import { getDb } from "@/lib/sqlite";
 import { runPropertyResearchAgent, type ResearchResult } from "@/lib/agents/propertyResearchAgent";
 
 export type { ResearchResult };
 
-const CACHE_TTL_DAYS = 7;
-
-async function ensureTable(): Promise<void> {
-  const db = getDb();
-  if (!db) return;
-  try {
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS private_project_price_estimates (
-        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_name       TEXT NOT NULL,
-        unit_type          TEXT NOT NULL,
-        estimated_psf_low  REAL,
-        estimated_psf_mid  REAL,
-        estimated_psf_high REAL,
-        confidence         TEXT,
-        price_basis        TEXT,
-        sources_json       TEXT,
-        notes_json         TEXT,
-        checked_at         TEXT,
-        created_at         TEXT,
-        UNIQUE(project_name, unit_type)
-      )
-    `);
-  } catch { /* table already exists or DB unavailable */ }
-}
-
-async function getCached(projectName: string, unitType: string): Promise<ResearchResult | null> {
+async function getFromDb(projectName: string): Promise<ResearchResult | null> {
   const db = getDb();
   if (!db) return null;
   try {
-    const res = await db.execute({
+    // Exact match first, then fuzzy
+    let res = await db.execute({
       sql: `SELECT * FROM private_project_price_estimates
-            WHERE UPPER(project_name) = UPPER(?) AND LOWER(unit_type) = LOWER(?)
-            LIMIT 1`,
-      args: [projectName, unitType],
+            WHERE UPPER(project_name) = UPPER(?) AND unit_type = 'any' LIMIT 1`,
+      args: [projectName],
     });
+    if (!res.rows.length) {
+      res = await db.execute({
+        sql: `SELECT * FROM private_project_price_estimates
+              WHERE UPPER(project_name) LIKE UPPER(?) AND unit_type = 'any'
+              ORDER BY estimated_psf_mid DESC LIMIT 1`,
+        args: [`%${projectName}%`],
+      });
+    }
     if (!res.rows.length) return null;
 
-    const row     = res.rows[0];
-    const ageMs   = Date.now() - new Date(String(row.checked_at)).getTime();
-    const ageDays = ageMs / (1000 * 60 * 60 * 24);
-    if (ageDays > CACHE_TTL_DAYS) return null;
-
+    const row = res.rows[0];
     return {
       project_name:       String(row.project_name),
       estimated_psf_low:  Number(row.estimated_psf_low),
@@ -65,7 +44,7 @@ async function getCached(projectName: string, unitType: string): Promise<Researc
   }
 }
 
-async function saveCache(result: ResearchResult, unitType: string): Promise<void> {
+async function saveToDb(result: ResearchResult, unitType: string): Promise<void> {
   const db = getDb();
   if (!db) return;
   try {
@@ -82,7 +61,7 @@ async function saveCache(result: ResearchResult, unitType: string): Promise<void
         result.checked_at, new Date().toISOString(),
       ],
     });
-  } catch { /* cache write failure is non-fatal */ }
+  } catch { /* non-fatal */ }
 }
 
 export async function getPropertyEstimate(
@@ -91,14 +70,13 @@ export async function getPropertyEstimate(
   targetPsf:    number,
   forceRefresh = false,
 ): Promise<ResearchResult> {
-  await ensureTable();
-
   if (!forceRefresh) {
-    const cached = await getCached(projectName, unitType);
-    if (cached) return cached;
+    const seeded = await getFromDb(projectName);
+    if (seeded) return seeded;
   }
 
+  // Not in DB → run Claude agent (web research)
   const result = await runPropertyResearchAgent(projectName, unitType, targetPsf);
-  await saveCache(result, unitType);
+  await saveToDb(result, unitType);
   return result;
 }
