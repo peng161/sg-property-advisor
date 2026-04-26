@@ -651,6 +651,9 @@ export default function ResultsDashboard({
             <p className="text-[9px] text-slate-400 leading-none">Your Home</p>
             <p className="text-sm font-semibold text-slate-800 leading-tight truncate">{displayAddress}</p>
           </div>
+          <Link href="/explore" className="shrink-0 text-[10px] text-slate-500 font-semibold">
+            Explore
+          </Link>
           <Link href="/assessment" className="shrink-0 text-[10px] text-indigo-500 font-semibold">
             ✏ Edit
           </Link>
@@ -703,6 +706,10 @@ export default function ResultsDashboard({
               </p>
             </div>
           </div>
+          <Link href="/explore"
+            className="shrink-0 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs px-4 py-2 rounded-lg transition-colors">
+            Explore Condos
+          </Link>
           <Link href="/assessment"
             className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition-colors">
             Update My Info
