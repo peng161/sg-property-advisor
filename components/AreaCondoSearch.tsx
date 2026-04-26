@@ -96,6 +96,8 @@ export default function AreaCondoSearch() {
   const [centre,     setCentre]     = useState<{ lat: number; lng: number; label: string } | null>(null);
   const [properties, setProperties] = useState<AreaCondoProperty[]>([]);
   const [selected,   setSelected]   = useState<string | null>(null);
+  const [debugInfo,  setDebugInfo]  = useState<AreaCondosResponse["debug"] | null>(null);
+  const [showDebug,  setShowDebug]  = useState(false);
 
   // ── Enrichment state ──────────────────────────────────────────────────────
   const [enrichedMap,      setEnrichedMap]      = useState<Record<string, EnrichedProperty>>({});
@@ -120,6 +122,7 @@ export default function AreaCondoSearch() {
     setProperties([]);
     setCentre(null);
     setSelected(null);
+    setDebugInfo(null);
     setEnrichedMap({});
     setEnrichDone(false);
     setEnrichingProject(null);
@@ -137,6 +140,7 @@ export default function AreaCondoSearch() {
 
       setCentre(data.centre);
       setProperties(data.properties);
+      setDebugInfo(data.debug);
     } catch {
       setSearchError("Network error. Please try again.");
     } finally {
@@ -362,8 +366,24 @@ export default function AreaCondoSearch() {
       {centre && (
         <div className="space-y-3">
 
-          {/* Category filter + count */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Count summary + category filter */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Condo / EC counts */}
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shrink-0">
+              <span className="text-sm font-black text-indigo-600">
+                {properties.filter((p) => p.property_category === "Condo").length}
+              </span>
+              <span className="text-xs text-slate-500">Condos</span>
+              <span className="w-px h-4 bg-slate-200" />
+              <span className="text-sm font-black text-emerald-600">
+                {properties.filter((p) => p.property_category === "EC").length}
+              </span>
+              <span className="text-xs text-slate-500">ECs</span>
+              <span className="w-px h-4 bg-slate-200" />
+              <span className="text-xs text-slate-400">within {radius >= 1000 ? `${radius / 1000} km` : `${radius} m`}</span>
+            </div>
+
+            {/* Category filter */}
             <div className="flex gap-1">
               {(["All", "Condo", "EC"] as const).map((c) => (
                 <button key={c} onClick={() => setCatFilter(c)}
@@ -376,11 +396,49 @@ export default function AreaCondoSearch() {
                 </button>
               ))}
             </div>
-            <span className="text-[10px] text-slate-400">
-              {visible.length} propert{visible.length !== 1 ? "ies" : "y"} found
-              {centre.label && ` near ${centre.label}`}
-            </span>
+
+            {/* Debug toggle */}
+            {debugInfo && (
+              <button
+                onClick={() => setShowDebug((v) => !v)}
+                className="ml-auto text-[10px] text-slate-400 hover:text-slate-600 underline shrink-0"
+              >
+                {showDebug ? "Hide debug" : "Debug"}
+              </button>
+            )}
           </div>
+
+          {/* Debug panel */}
+          {showDebug && debugInfo && (
+            <div className="bg-slate-900 text-slate-300 rounded-xl text-[11px] font-mono p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2">
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">Geocoded as</p>
+                <p className="text-white font-semibold truncate">{debugInfo.geocoded_label}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">OneMap API hits</p>
+                <p className="text-white font-semibold">{debugInfo.total_api_results.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">Within {radius >= 1000 ? `${radius / 1000} km` : `${radius} m`}</p>
+                <p className="text-white font-semibold">{debugInfo.within_radius}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">After filter</p>
+                <p className="text-white font-semibold">{debugInfo.after_filter}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">After dedup</p>
+                <p className="text-white font-semibold">{debugInfo.after_dedup}</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-[9px] uppercase tracking-wider">Condos / ECs</p>
+                <p className="text-white font-semibold">
+                  {properties.filter((p) => p.property_category === "Condo").length} / {properties.filter((p) => p.property_category === "EC").length}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col md:flex-row gap-3">
 
