@@ -17,6 +17,7 @@
 // Classification is deterministic — no inference, no guessing.
 
 import { type NextRequest } from "next/server";
+import { getDb } from "@/lib/sqlite";
 
 export const dynamic = "force-dynamic";
 
@@ -276,11 +277,61 @@ async function searchKeyword(
   return { found, totalApiResults };
 }
 
+// ── DB query (when seeded) ────────────────────────────────────────────────────
+
+async function queryDb(
+  centLat:  number,
+  centLng:  number,
+  radiusKm: number,
+): Promise<AreaCondoProperty[] | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  // Check table exists and has rows
+  try {
+    const countRes = await db.execute("SELECT COUNT(*) as n FROM onemap_condo");
+    const count = Number(countRes.rows[0]?.n ?? 0);
+    if (count === 0) return null;
+
+    // Bounding box pre-filter (1° ≈ 111 km) then exact JS haversine
+    const delta = radiusKm / 111.32;
+    const res   = await db.execute({
+      sql: `
+        SELECT project_name, property_category, address, postal_code, lat, lng
+        FROM onemap_condo
+        WHERE lat BETWEEN ? AND ?
+          AND lng BETWEEN ? AND ?
+      `,
+      args: [centLat - delta, centLat + delta, centLng - delta, centLng + delta],
+    });
+
+    const results: AreaCondoProperty[] = [];
+    for (const r of res.rows) {
+      const lat  = Number(r.lat);
+      const lng  = Number(r.lng);
+      const dist = Math.round(haversineKm(centLat, centLng, lat, lng) * 100) / 100;
+      if (dist > radiusKm) continue;
+      results.push({
+        project_name:      String(r.project_name),
+        property_category: String(r.property_category) as "Condo" | "EC",
+        address:           String(r.address  ?? ""),
+        postal_code:       String(r.postal_code ?? ""),
+        lat,
+        lng,
+        distance_km: dist,
+      });
+    }
+
+    results.sort((a, b) => a.distance_km - b.distance_km);
+    return results;
+  } catch {
+    return null; // table missing — fall through to live search
+  }
+}
+
 // ── GET handler ───────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  console.log("[area-condos] mode=search_keyword_mode (OneMap Themes API has no private-residential layer)");
-
   const sp      = req.nextUrl.searchParams;
   const query   = sp.get("query")?.trim() ?? "";
   const radiusM = Math.max(250, Math.min(5000, Number(sp.get("radius") ?? 1500)));
@@ -292,7 +343,7 @@ export async function GET(req: NextRequest) {
   const token    = process.env.ONEMAP_TOKEN ?? "";
   const radiusKm = radiusM / 1000;
 
-  // ── Step 1: geocode ────────────────────────────────────────────────────────
+  // ── Step 1: geocode (always fast — 1 API call) ────────────────────────────
   const centre = await geocode(query, token);
   if (!centre) {
     return Response.json(
@@ -301,7 +352,27 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // ── Step 2: search each keyword ────────────────────────────────────────────
+  // ── Step 2a: try DB (fast path) ───────────────────────────────────────────
+  const dbResults = await queryDb(centre.lat, centre.lng, radiusKm);
+  if (dbResults !== null) {
+    console.log(`[area-condos] mode=db_mode — ${dbResults.length} results from onemap_condo`);
+    const response: AreaCondosResponse = {
+      centre,
+      properties: dbResults,
+      debug: {
+        geocoded_label:    centre.label,
+        total_api_results: 0,
+        within_radius:     dbResults.length,
+        after_filter:      dbResults.length,
+        after_dedup:       dbResults.length,
+      },
+    };
+    return Response.json(response);
+  }
+
+  // ── Step 2b: live OneMap keyword search (slow path — DB not seeded) ───────
+  console.log("[area-condos] mode=search_keyword_mode — DB empty, falling back to live OneMap");
+
   const allRaw: AreaCondoProperty[] = [];
   let   totalApiResults              = 0;
   let   withinRadiusTotal            = 0;
@@ -316,7 +387,7 @@ export async function GET(req: NextRequest) {
     console.log(`[area-condos] keyword="${keyword}" subtotal: ${found.length} kept`);
   }
 
-  // ── Step 3: deduplicate by (project_name, postal_code) ────────────────────
+  // Deduplicate by (project_name, postal_code)
   const seen = new Set<string>();
   const deduped: AreaCondoProperty[] = [];
   for (const p of allRaw) {
@@ -325,8 +396,6 @@ export async function GET(req: NextRequest) {
     seen.add(key);
     deduped.push(p);
   }
-
-  // Sort by distance
   deduped.sort((a, b) => a.distance_km - b.distance_km);
 
   console.log(
@@ -338,11 +407,11 @@ export async function GET(req: NextRequest) {
     centre,
     properties: deduped,
     debug: {
-      geocoded_label: centre.label,
+      geocoded_label:    centre.label,
       total_api_results: totalApiResults,
-      within_radius: withinRadiusTotal,
-      after_filter: withinRadiusTotal, // filtering happens inside searchKeyword
-      after_dedup: deduped.length,
+      within_radius:     withinRadiusTotal,
+      after_filter:      withinRadiusTotal,
+      after_dedup:       deduped.length,
     },
   };
 
