@@ -9,8 +9,8 @@ import type { FinancialProfile } from "@/lib/myinfo/types";
 import FinancialProfilePanel from "./FinancialProfilePanel";
 import UpgradeScorePanel from "./UpgradeScorePanel";
 
-const LeafletMap      = dynamic(() => import("./LeafletMap"),      { ssr: false });
-const NearbyCondoMap  = dynamic(() => import("./NearbyCondoMap"),  { ssr: false });
+const LeafletMap       = dynamic(() => import("./LeafletMap"),       { ssr: false });
+const AreaCondoSearch  = dynamic(() => import("./AreaCondoSearch"),  { ssr: false });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1227,16 +1227,16 @@ export default function ResultsDashboard({
           </section>
 
           {/* ── Section 4: Nearby Private Condos / ECs ── */}
-          {hasCoords && (
+          {!!postalCode && (
             <section className="bg-white rounded-xl border border-slate-200 p-5">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">4</div>
                 <div>
                   <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Nearby Private Condos &amp; ECs</h2>
-                  <p className="text-xs text-slate-400">All private residential projects geocoded within your chosen radius</p>
+                  <p className="text-xs text-slate-400">Live OneMap search — adjust radius or search a different area</p>
                 </div>
               </div>
-              <NearbyCondoMap lat={lat} lng={lng} />
+              <AreaCondoSearch initialPostalCode={postalCode} />
             </section>
           )}
 

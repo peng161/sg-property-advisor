@@ -84,9 +84,9 @@ function popupHtml(p: AreaCondoProperty, enriched: EnrichedProperty | null): str
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function AreaCondoSearch() {
+export default function AreaCondoSearch({ initialPostalCode }: { initialPostalCode?: string } = {}) {
   // ── Search state ──────────────────────────────────────────────────────────
-  const [query,       setQuery]       = useState("");
+  const [query,       setQuery]       = useState(initialPostalCode ?? "");
   const [radius,      setRadius]      = useState(1500);
   const [catFilter,   setCatFilter]   = useState<"All" | "Condo" | "EC">("All");
   const [searching,   setSearching]   = useState(false);
@@ -115,8 +115,10 @@ export default function AreaCondoSearch() {
     : properties.filter((p) => p.property_category === catFilter);
 
   // ── Search handler ────────────────────────────────────────────────────────
-  const handleSearch = useCallback(async () => {
-    if (!query.trim()) return;
+  const handleSearch = useCallback(async (overrideQuery?: string) => {
+    const q = (overrideQuery ?? query).trim();
+    if (!q) return;
+    if (overrideQuery) setQuery(overrideQuery);
     setSearching(true);
     setSearchError(null);
     setProperties([]);
@@ -129,7 +131,7 @@ export default function AreaCondoSearch() {
 
     try {
       const res = await fetch(
-        `/api/area-condos?query=${encodeURIComponent(query.trim())}&radius=${radius}`,
+        `/api/area-condos?query=${encodeURIComponent(q)}&radius=${radius}`,
       );
       const data: AreaCondosResponse & { error?: string } = await res.json();
 
@@ -147,6 +149,14 @@ export default function AreaCondoSearch() {
       setSearching(false);
     }
   }, [query, radius]);
+
+  // ── Auto-search when pre-populated ───────────────────────────────────────
+  useEffect(() => {
+    if (initialPostalCode?.trim()) {
+      handleSearch(initialPostalCode.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally runs once on mount only
 
   // ── Enrichment: sequential, one property at a time ────────────────────────
   useEffect(() => {
@@ -324,7 +334,7 @@ export default function AreaCondoSearch() {
 
           <div className="sm:self-end">
             <button
-              onClick={handleSearch}
+              onClick={() => handleSearch()}
               disabled={searching || !query.trim()}
               className="w-full sm:w-auto px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg transition-colors"
             >
