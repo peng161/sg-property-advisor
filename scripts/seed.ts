@@ -1,31 +1,37 @@
 /**
- * Seed script — pulls HDB resale data from data.gov.sg and writes to SQLite.
+ * Seed script — pulls HDB resale data from data.gov.sg and writes to Turso.
  *
  * Run once:  npm run seed
  *
  * For private condo data, run:  npm run seed:condos
- * (or use the "Seed All Singapore Condos" button on the /explore page)
  *
- * Optional env vars:
+ * Required env vars (in .env.local):
+ *   TURSO_DATABASE_URL   — libsql://... URL from Turso dashboard
+ *   TURSO_AUTH_TOKEN     — Turso auth token
+ *
+ * Optional:
  *   DATA_GOV_SG_API_KEY  — higher rate limits on data.gov.sg CKAN API
- *
- * Output:  data/sg-property.db
  */
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import path from "path";
-import fs from "fs";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 
-// ── constants ────────────────────────────────────────────────────────────────
+// ── DB ────────────────────────────────────────────────────────────────────────
 
-const DB_PATH      = path.join(process.cwd(), "data", "sg-property.db");
+const db = createClient({
+  url:       process.env.TURSO_DATABASE_URL!,
+  authToken: process.env.TURSO_AUTH_TOKEN!,
+});
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
 const CURRENT_YEAR = new Date().getFullYear();
 const START_YEAR   = CURRENT_YEAR - 5;
+const CHUNK        = 500;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -34,7 +40,7 @@ function parseRemainingLease(raw: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-// ── geocoding ─────────────────────────────────────────────────────────────────
+// ── Town centroid fallbacks ───────────────────────────────────────────────────
 
 const TOWN_COORDS: Record<string, [number, number]> = {
   "ANG MO KIO":      [1.3691, 103.8454], "BEDOK":           [1.3236, 103.9273],
@@ -52,6 +58,8 @@ const TOWN_COORDS: Record<string, [number, number]> = {
   "WOODLANDS":       [1.4369, 103.7864], "YISHUN":          [1.4304, 103.8354],
   "LIM CHU KANG":    [1.4196, 103.7184], "TENGAH":          [1.3740, 103.7350],
 };
+
+// ── Geocoding ─────────────────────────────────────────────────────────────────
 
 const geoCache = new Map<string, [number, number] | null>();
 
@@ -87,15 +95,77 @@ async function geocodeBulk(queries: string[], concurrency = 4, delayMs = 400) {
   return out;
 }
 
-// ── SQLite setup ──────────────────────────────────────────────────────────────
+// ── HDB fetching ──────────────────────────────────────────────────────────────
 
-function openDb(): Database.Database {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
+const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
+const HDB_BATCH_SIZE  = 10_000;
+const HDB_MAX_PAGES   = 50;
+const HDB_MAX_RETRIES = 5;
 
-  db.exec(`
+interface RawHdb { [key: string]: string }
+
+async function fetchAllHdb(): Promise<RawHdb[]> {
+  const all: RawHdb[] = [];
+  let offset = 0;
+  let page   = 1;
+  let total  = Infinity;
+
+  while (page <= HDB_MAX_PAGES) {
+    const url =
+      `https://data.gov.sg/api/action/datastore_search` +
+      `?resource_id=${HDB_RESOURCE_ID}` +
+      `&limit=${HDB_BATCH_SIZE}` +
+      `&offset=${offset}` +
+      `&sort=month%20desc`;
+
+    type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
+    const hdbApiKey = process.env.DATA_GOV_SG_API_KEY ?? "";
+    const hdbHeaders: Record<string, string> = { Accept: "application/json" };
+    if (hdbApiKey) hdbHeaders["x-api-key"] = hdbApiKey;
+
+    let json: HdbPage | null = null;
+    for (let attempt = 1; attempt <= HDB_MAX_RETRIES; attempt++) {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30000), headers: hdbHeaders });
+      if (res.status === 429) {
+        const wait = Math.min(4000 * 2 ** (attempt - 1), 64000);
+        console.log(`\n    429 — waiting ${wait / 1000}s…`);
+        if (attempt === HDB_MAX_RETRIES) { console.error("  Max retries reached. Stopping."); return all; }
+        await sleep(wait);
+        continue;
+      }
+      if (!res.ok) { console.error(`  Bad response ${res.status}. Stopping.`); return all; }
+      json = await res.json() as HdbPage;
+      break;
+    }
+    if (!json) break;
+
+    const batch = json.result?.records ?? [];
+    if (typeof json.result?.total === "number") total = json.result.total;
+    console.log(`  Page ${page} | offset ${offset} | got ${batch.length} | total ${total === Infinity ? "?" : total}`);
+
+    if (batch.length === 0) { console.log("  Empty page — done."); break; }
+
+    let passedWindow = false;
+    for (const r of batch) {
+      const y = parseInt((r.month ?? "0000").slice(0, 4), 10);
+      if (y < START_YEAR) { passedWindow = true; continue; }
+      if (y <= CURRENT_YEAR) all.push(r);
+    }
+    if (passedWindow) { console.log("  Reached date window start — stopping."); break; }
+    if (offset + batch.length >= total) { console.log("  End of dataset."); break; }
+
+    offset += HDB_BATCH_SIZE;
+    page++;
+    await sleep(hdbApiKey ? 600 : 2700);
+  }
+
+  return all;
+}
+
+// ── Table setup ───────────────────────────────────────────────────────────────
+
+async function createTables() {
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS hdb_tx (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
       block                TEXT    NOT NULL,
@@ -112,170 +182,76 @@ function openDb(): Database.Database {
       lat                  REAL    NOT NULL,
       lng                  REAL    NOT NULL,
       UNIQUE(block, street_name, flat_type, storey_range, month)
-    );
-    CREATE INDEX IF NOT EXISTS idx_hdb_loc      ON hdb_tx(lat, lng);
-    CREATE INDEX IF NOT EXISTS idx_hdb_flattype ON hdb_tx(flat_type);
+    )
   `);
-  return db;
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_hdb_loc      ON hdb_tx(lat, lng)");
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_hdb_flattype ON hdb_tx(flat_type)");
 }
 
-// ── HDB fetching ──────────────────────────────────────────────────────────────
-
-const HDB_RESOURCE_ID = "d_8b84c4ee58e3cfc0ece0d773c8ca6abc";
-const HDB_BATCH_SIZE  = 10_000;
-const HDB_MAX_PAGES   = 50;
-const HDB_MAX_RETRIES = 5;
-
-interface RawHdb { [key: string]: string }
-
-async function fetchAllHdb(): Promise<RawHdb[]> {
-  const all: RawHdb[] = [];
-  let offset  = 0;
-  let page    = 1;
-  let total   = Infinity;
-
-  while (page <= HDB_MAX_PAGES) {
-    const url =
-      `https://data.gov.sg/api/action/datastore_search` +
-      `?resource_id=${HDB_RESOURCE_ID}` +
-      `&limit=${HDB_BATCH_SIZE}` +
-      `&offset=${offset}` +
-      `&sort=month%20desc`;
-
-    type HdbPage = { result?: { records?: RawHdb[]; total?: number } };
-    const hdbApiKey = process.env.DATA_GOV_SG_API_KEY ?? process.env.DATAGOV_API_KEY ?? "";
-    const hdbHeaders: Record<string, string> = { Accept: "application/json" };
-    if (hdbApiKey) hdbHeaders["x-api-key"] = hdbApiKey;
-
-    let json: HdbPage | null = null;
-    for (let attempt = 1; attempt <= HDB_MAX_RETRIES; attempt++) {
-      const res = await fetch(url, {
-        signal:  AbortSignal.timeout(30000),
-        headers: hdbHeaders,
-      });
-
-      if (res.status === 429) {
-        const wait = Math.min(4000 * 2 ** (attempt - 1), 64000);
-        console.log(`    429 — attempt ${attempt}/${HDB_MAX_RETRIES}, waiting ${wait / 1000}s…`);
-        if (attempt === HDB_MAX_RETRIES) {
-          console.error("  ✗ Max retries reached on 429. Stopping — partial data saved.");
-          return all;
-        }
-        await sleep(wait);
-        continue;
-      }
-
-      const ct = res.headers.get("content-type") ?? "";
-      if (!res.ok || !ct.includes("application/json")) {
-        const text = await res.text();
-        console.error(`  ✗ Bad response (${res.status}, "${ct}"):\n${text.slice(0, 500)}`);
-        console.error("  Stopping — partial data saved.");
-        return all;
-      }
-
-      json = await res.json() as HdbPage;
-      break;
-    }
-
-    if (!json) break;
-
-    const batch = json.result?.records ?? [];
-    if (typeof json.result?.total === "number") total = json.result.total;
-
-    console.log(`  Page ${page} | offset ${offset} | got ${batch.length} | total ${total === Infinity ? "?" : total}`);
-
-    if (batch.length === 0) {
-      console.log("  Empty page — pagination complete.");
-      break;
-    }
-
-    let passedWindow = false;
-    for (const r of batch) {
-      const y = parseInt((r.month ?? "0000").slice(0, 4), 10);
-      if (y < START_YEAR) { passedWindow = true; continue; }
-      if (y <= CURRENT_YEAR) all.push(r);
-    }
-
-    if (passedWindow) {
-      console.log("  Reached start of date window — stopping early.");
-      break;
-    }
-
-    if (offset + batch.length >= total) {
-      console.log("  Reached end of dataset.");
-      break;
-    }
-
-    offset += HDB_BATCH_SIZE;
-    page++;
-    await sleep(hdbApiKey ? 600 : 2700);
-  }
-
-  if (page > HDB_MAX_PAGES) {
-    console.warn(`  ⚠ Hit MAX_PAGES (${HDB_MAX_PAGES}) safety guard — stopping.`);
-  }
-
-  return all;
-}
-
-// ── main ──────────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`Opening SQLite: ${DB_PATH}\n`);
-  const db = openDb();
+  if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
+    console.error("✗ TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set in .env.local");
+    process.exit(1);
+  }
+
+  console.log(`Connecting to Turso: ${process.env.TURSO_DATABASE_URL}\n`);
+  await createTables();
+  console.log("Tables ready.\n");
 
   console.log(`Fetching HDB resale data (last 5 years: ${START_YEAR}–${CURRENT_YEAR})…`);
   const allHdb = await fetchAllHdb();
   console.log(`\nTotal HDB records in range: ${allHdb.length}\n`);
 
   const uniqueStreets = [...new Set(allHdb.map((r) => r.street_name as string))];
-  console.log(`Geocoding ${uniqueStreets.length} unique HDB streets…`);
-  const hdbGeo = await geocodeBulk(uniqueStreets, 8, 200);
+  console.log(`Geocoding ${uniqueStreets.length} unique streets…`);
+  const hdbGeo  = await geocodeBulk(uniqueStreets, 8, 200);
   const geocoded = [...hdbGeo.values()].filter(Boolean).length;
   console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueStreets.length - geocoded}\n`);
 
-  console.log("Writing HDB transactions to SQLite…");
-  const insertHdb = db.prepare(`
-    INSERT OR REPLACE INTO hdb_tx
-      (block, street_name, town, flat_type, storey_range, sqm, resale_price,
-       price_per_sqm, month, lease_commence_year, remaining_lease, lat, lng)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `);
-
-  const insertManyHdb = db.transaction((rows: RawHdb[]) => {
-    let ok = 0;
-    for (const row of rows) {
-      const precise  = hdbGeo.get(row.street_name as string);
-      const town     = (row.town ?? "").toUpperCase().trim();
-      const fallback = TOWN_COORDS[town] ?? null;
-      const coords   = precise ?? fallback;
-      if (!coords) continue;
-      const price = Number(row.resale_price);
-      const sqm   = Number(row.floor_area_sqm);
-      if (!price || !sqm) continue;
-      const [lat, lng] = coords;
-      insertHdb.run(
+  // Build valid rows
+  const rows: Parameters<typeof db.batch>[0] = [];
+  for (const row of allHdb) {
+    const precise  = hdbGeo.get(row.street_name as string);
+    const town     = (row.town ?? "").toUpperCase().trim();
+    const fallback = TOWN_COORDS[town] ?? null;
+    const coords   = precise ?? fallback;
+    if (!coords) continue;
+    const price = Number(row.resale_price);
+    const sqm   = Number(row.floor_area_sqm);
+    if (!price || !sqm) continue;
+    const [lat, lng] = coords;
+    rows.push({
+      sql: `INSERT OR REPLACE INTO hdb_tx
+              (block, street_name, town, flat_type, storey_range, sqm, resale_price,
+               price_per_sqm, month, lease_commence_year, remaining_lease, lat, lng)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      args: [
         row.block, row.street_name, row.town ?? "", row.flat_type,
         row.storey_range, sqm, price, Math.round(price / sqm), row.month,
         Number(row.lease_commence_date) || 0,
         parseRemainingLease(row.remaining_lease ?? ""),
         lat, lng,
-      );
-      ok++;
-    }
-    return ok;
-  });
+      ],
+    });
+  }
 
-  const hdbOk = insertManyHdb(allHdb);
-  console.log(`  Done: ${hdbOk} rows written\n`);
+  console.log(`Writing ${rows.length} rows to Turso in chunks of ${CHUNK}…`);
+  let written = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await db.batch(rows.slice(i, i + CHUNK), "write");
+    written += Math.min(CHUNK, rows.length - i);
+    process.stdout.write(`\r  Written: ${written}/${rows.length}`);
+  }
+  process.stdout.write("\n");
 
-  const hdbCount = (db.prepare("SELECT COUNT(*) as n FROM hdb_tx").get() as { n: number }).n;
-  db.close();
+  const countRes = await db.execute("SELECT COUNT(*) as n FROM hdb_tx");
+  const hdbTotal = Number(countRes.rows[0]?.n ?? 0);
 
-  console.log("✓  Seed complete");
-  console.log(`   HDB transactions: ${hdbCount.toLocaleString()}`);
-  console.log(`   Database:         ${DB_PATH}`);
-  console.log(`\nFor private condo data, run:  npm run seed:condos`);
+  console.log("\n✓ Seed complete");
+  console.log(`  HDB transactions in Turso : ${hdbTotal.toLocaleString()}`);
+  console.log("\nFor private condo data, run:  npm run seed:condos");
 }
 
 main().catch((e) => { console.error("Seed failed:", e); process.exit(1); });

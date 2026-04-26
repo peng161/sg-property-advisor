@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts",
+    "seed:hdb": "tsx scripts/seed.ts",
     "seed:condos": "tsx scripts/seed-condos.ts"
   },
   "dependencies": {
