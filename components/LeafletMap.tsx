@@ -162,11 +162,18 @@ export interface LeafletMapProps {
 export default function LeafletMap({
   lat, lng, postalCode, properties, nearbyCondos = [], selectedProject, onSelectProject,
 }: LeafletMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<import("leaflet").Map | null>(null);
+  const containerRef    = useRef<HTMLDivElement>(null);
+  const mapRef          = useRef<import("leaflet").Map | null>(null);
+  const nearbyLayerRef  = useRef<import("leaflet").LayerGroup | null>(null);
+  const propertyLayerRef= useRef<import("leaflet").LayerGroup | null>(null);
+  // Store the Leaflet module after first import so subsequent effects can use it
+  const lRef            = useRef<typeof import("leaflet")["default"] | null>(null);
 
   const hasCoords = lat > 0 && lng > 0;
 
+  // ── Effect 1: Initialize (or destroy + recreate) the Leaflet map ─────────
+  // Only rebuilds when the home location / postal code changes.
+  // Does NOT depend on nearbyCondos or properties — those are updated below.
   useEffect(() => {
     if (!hasCoords || !containerRef.current) return;
 
@@ -219,6 +226,8 @@ export default function LeafletMap({
 
       if (destroyed || !containerRef.current) return;
 
+      lRef.current = L;
+
       // Create map
       const map = L.map(containerRef.current, {
         center:    [lat, lng],
@@ -258,61 +267,9 @@ export default function LeafletMap({
           </div>
         `, { maxWidth: 240 });
 
-      // Nearby condos from DB — small background dots (rendered first, so top-7 sit on top)
-      const topLatLngs = new Set(
-        properties
-          .filter((p) => p.projectLat !== null && p.projectLng !== null)
-          .map((p) => `${p.projectLat!.toFixed(4)},${p.projectLng!.toFixed(4)}`)
-      );
-
-      nearbyCondos.forEach((c) => {
-        // Skip if same location as a top-7 marker (avoid double dot)
-        if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
-
-        const isEC  = c.property_category === "EC";
-        const color = isEC ? C.emerald : "#94a3b8"; // slate-400 for condos, emerald for ECs
-        const icon  = L.divIcon({
-          className:  "",
-          iconSize:   [22, 22],
-          iconAnchor: [11, 11],
-          html: `<div style="
-            width:22px;height:22px;border-radius:50%;
-            background:${color};border:2px solid ${C.white};
-            display:flex;align-items:center;justify-content:center;
-            box-shadow:0 1px 4px rgba(0,0,0,.25);
-            font-size:7px;font-weight:800;color:${C.white};
-          ">${isEC ? "EC" : "C"}</div>`,
-        });
-
-        L.marker([c.lat, c.lng], { icon })
-          .addTo(map)
-          .bindPopup(
-            `<div style="font-family:system-ui,sans-serif;padding:8px 10px;background:${C.bg};border-radius:10px;">
-              <div style="font-weight:700;font-size:12px;color:${C.text};margin-bottom:3px;">${c.project_name}</div>
-              <div style="font-size:10px;color:${C.muted};">${c.address || "—"}</div>
-              <div style="margin-top:4px;font-size:10px;">
-                <span style="font-weight:700;padding:1px 6px;border-radius:999px;background:${color}22;color:${color};">${c.property_category}</span>
-                <span style="color:${C.indigo};font-weight:700;margin-left:6px;">📍 ${c.distance_km} km</span>
-              </div>
-            </div>`,
-            { maxWidth: 240 },
-          );
-      });
-
-      // Top-7 recommended property markers (rendered after nearby, so they're on top)
-      properties.forEach((p, i) => {
-        if (p.projectLat === null || p.projectLng === null) return;
-        const rank       = i + 1;
-        const isTop      = rank === 1;
-        const isSelected = p.project === selectedProject;
-        const icon       = propIcon(L, rank, isTop, isSelected);
-
-        const marker = L.marker([p.projectLat!, p.projectLng!], { icon })
-          .addTo(map)
-          .bindPopup(popupHtml(rank, p), { maxWidth: 280 });
-
-        marker.on("click", () => onSelectProject(p.project));
-      });
+      // Layer groups for dynamic markers (populated by Effects 2 & 3)
+      nearbyLayerRef.current   = L.layerGroup().addTo(map);
+      propertyLayerRef.current = L.layerGroup().addTo(map);
 
       // Legend control
       const LegendControl = L.Control.extend({
@@ -329,14 +286,91 @@ export default function LeafletMap({
 
     return () => {
       destroyed = true;
+      nearbyLayerRef.current   = null;
+      propertyLayerRef.current = null;
+      lRef.current             = null;
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
-    // Rebuild map when coords, nearby condos, or selection changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lat, lng, postalCode, properties.length, nearbyCondos.length, selectedProject]);
+  }, [lat, lng, postalCode]);
+
+  // ── Effect 2: Update nearby condo dots whenever nearbyCondos changes ─────
+  // Clears and re-populates the nearbyLayer without touching the rest of the map.
+  useEffect(() => {
+    const L     = lRef.current;
+    const layer = nearbyLayerRef.current;
+    if (!L || !layer) return;
+
+    layer.clearLayers();
+
+    // Collect positions of ranked property markers to avoid double-dots
+    const topLatLngs = new Set(
+      properties
+        .filter((p) => p.projectLat !== null && p.projectLng !== null)
+        .map((p) => `${p.projectLat!.toFixed(4)},${p.projectLng!.toFixed(4)}`)
+    );
+
+    nearbyCondos.forEach((c) => {
+      if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
+
+      const isEC  = c.property_category === "EC";
+      const color = isEC ? C.emerald : "#94a3b8";
+      const icon  = L.divIcon({
+        className:  "",
+        iconSize:   [22, 22],
+        iconAnchor: [11, 11],
+        html: `<div style="
+          width:22px;height:22px;border-radius:50%;
+          background:${color};border:2px solid ${C.white};
+          display:flex;align-items:center;justify-content:center;
+          box-shadow:0 1px 4px rgba(0,0,0,.25);
+          font-size:7px;font-weight:800;color:${C.white};
+        ">${isEC ? "EC" : "C"}</div>`,
+      });
+
+      L.marker([c.lat, c.lng], { icon })
+        .addTo(layer)
+        .bindPopup(
+          `<div style="font-family:system-ui,sans-serif;padding:8px 10px;background:${C.bg};border-radius:10px;">
+            <div style="font-weight:700;font-size:12px;color:${C.text};margin-bottom:3px;">${c.project_name}</div>
+            <div style="font-size:10px;color:${C.muted};">${c.address || "—"}</div>
+            <div style="margin-top:4px;font-size:10px;">
+              <span style="font-weight:700;padding:1px 6px;border-radius:999px;background:${color}22;color:${color};">${c.property_category}</span>
+              <span style="color:${C.indigo};font-weight:700;margin-left:6px;">📍 ${c.distance_km} km</span>
+            </div>
+          </div>`,
+          { maxWidth: 240 },
+        );
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearbyCondos]);
+
+  // ── Effect 3: Update ranked property markers whenever selection changes ──
+  useEffect(() => {
+    const L     = lRef.current;
+    const layer = propertyLayerRef.current;
+    if (!L || !layer) return;
+
+    layer.clearLayers();
+
+    properties.forEach((p, i) => {
+      if (p.projectLat === null || p.projectLng === null) return;
+      const rank       = i + 1;
+      const isTop      = rank === 1;
+      const isSelected = p.project === selectedProject;
+      const icon       = propIcon(L, rank, isTop, isSelected);
+
+      const marker = L.marker([p.projectLat!, p.projectLng!], { icon })
+        .addTo(layer)
+        .bindPopup(popupHtml(rank, p), { maxWidth: 280 });
+
+      marker.on("click", () => onSelectProject(p.project));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [properties, selectedProject]);
 
   if (!hasCoords) {
     return (
