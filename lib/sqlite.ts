@@ -2,7 +2,15 @@ import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 
-export const LOCAL_DB_PATH = path.join(process.cwd(), "data", "sg-property.db");
+// Turbopack may set cwd() to the monorepo root (first-app/) instead of the
+// Next.js project dir (sg-property-advisor/). Try both paths.
+export const LOCAL_DB_PATH = (() => {
+  const candidates = [
+    path.join(process.cwd(), "data", "sg-property.db"),
+    path.join(process.cwd(), "sg-property-advisor", "data", "sg-property.db"),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
+})();
 
 let _client: Client | null = null;
 
