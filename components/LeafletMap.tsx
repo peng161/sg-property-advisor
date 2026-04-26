@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ExtendedProjectSummary } from "./ResultsDashboard";
 import type { AreaCondoProperty } from "@/app/api/area-condos/route";
 
@@ -166,6 +166,7 @@ export default function LeafletMap({
   const mapRef          = useRef<import("leaflet").Map | null>(null);
   const nearbyLayerRef  = useRef<import("leaflet").LayerGroup | null>(null);
   const propertyLayerRef= useRef<import("leaflet").LayerGroup | null>(null);
+  const [mapReady, setMapReady] = useState(0);
 
   const hasCoords = lat > 0 && lng > 0;
 
@@ -267,6 +268,9 @@ export default function LeafletMap({
       nearbyLayerRef.current   = L.layerGroup().addTo(map);
       propertyLayerRef.current = L.layerGroup().addTo(map);
 
+      // Signal Effects 2 & 3 that layer refs are now ready
+      if (!destroyed) setMapReady((v) => v + 1);
+
       // Legend control
       const LegendControl = L.Control.extend({
         onAdd() {
@@ -350,7 +354,7 @@ export default function LeafletMap({
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nearbyCondos]);
+  }, [nearbyCondos, mapReady]);
 
   // ── Effect 3: Update ranked property markers whenever selection changes ──
   useEffect(() => {
@@ -383,7 +387,7 @@ export default function LeafletMap({
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [properties, selectedProject]);
+  }, [properties, selectedProject, mapReady]);
 
   if (!hasCoords) {
     return (
