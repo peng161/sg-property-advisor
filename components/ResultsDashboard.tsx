@@ -967,37 +967,35 @@ export default function ResultsDashboard({
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5 space-y-1.5 text-[10px]">
               <p className="font-semibold text-slate-500 uppercase tracking-wide text-[8px] mb-1">Data Status</p>
 
-              {/* DB connection */}
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${debugInfo.dbReady ? "bg-emerald-500" : "bg-red-400"}`} />
-                <span className="text-slate-600 font-medium">
-                  {debugInfo.dbReady ? "Local DB connected" : "Local DB not found"}
+              {/* HDB */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${debugInfo.dbReady && debugInfo.hdbDbCount > 0 ? "bg-emerald-500" : "bg-red-400"}`} />
+                  <span className="text-slate-600 font-medium">HDB</span>
+                </div>
+                <span className="text-slate-500">
+                  {debugInfo.dbReady && debugInfo.hdbDbCount > 0 ? `${debugInfo.hdbDbCount.toLocaleString()} rows` : "not seeded"}
                 </span>
               </div>
 
-              {/* HDB rows */}
+              {/* Condos */}
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">HDB records</span>
-                <span className="font-semibold text-slate-700">
-                  {debugInfo.dbReady ? debugInfo.hdbDbCount.toLocaleString() : "—"}
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${debugInfo.dbReady && debugInfo.privateDbCount > 0 ? "bg-emerald-500" : "bg-red-400"}`} />
+                  <span className="text-slate-600 font-medium">Condos</span>
+                </div>
+                <span className="text-slate-500">
+                  {debugInfo.dbReady && debugInfo.privateDbCount > 0 ? `${debugInfo.privateDbCount.toLocaleString()} seeded` : "not seeded"}
                 </span>
               </div>
 
-              {/* Condo rows */}
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Condos seeded</span>
-                <span className="font-semibold text-slate-700">
-                  {debugInfo.dbReady ? debugInfo.privateDbCount.toLocaleString() : "—"}
-                </span>
-              </div>
-
-              {/* Nearby condos */}
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Condos within 1.5 km</span>
-                <span className="font-semibold text-slate-700">
-                  {debugInfo.dbReady ? debugInfo.dbProjectsWithin1_5km : "—"}
-                </span>
-              </div>
+              {/* Nearby */}
+              {debugInfo.dbReady && (
+                <div className="flex items-center justify-between pt-0.5 border-t border-slate-200">
+                  <span className="text-slate-400">Within 1.5 km</span>
+                  <span className="font-semibold text-slate-700">{debugInfo.dbProjectsWithin1_5km} condos</span>
+                </div>
+              )}
             </div>
           </div>
         </aside>
