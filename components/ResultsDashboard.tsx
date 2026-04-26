@@ -56,6 +56,8 @@ export interface DebugInfo {
   privateSource:          string;
   hdbSource:              string;
   dbReady:                boolean;
+  dbPath?:                string;
+  serverCwd?:             string;
 }
 
 export interface DashboardProps {
@@ -987,6 +989,8 @@ export default function ResultsDashboard({
                   ["Private Source", debugInfo.privateSource],
                   ["HDB Source", debugInfo.hdbSource],
                   ["SQLite DB", debugInfo.dbReady ? "Ready" : "Not seeded — run npm run seed"],
+                  ["DB Path", debugInfo.dbPath ?? "—"],
+                  ["Server CWD", debugInfo.serverCwd ?? "—"],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between gap-1 leading-tight">
                     <span className="text-slate-400 shrink-0">{k}</span>

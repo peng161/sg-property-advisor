@@ -14,7 +14,7 @@ import {
   haversineKm,
   dbStatus,
 } from "@/lib/dbQueries";
-import { isDbReady } from "@/lib/sqlite";
+import { isDbReady, LOCAL_DB_PATH } from "@/lib/sqlite";
 import { getUserFinancialProfile } from "@/lib/financialProfile";
 import { isMyinfoConfigured } from "@/lib/myinfo/config";
 
@@ -390,6 +390,8 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     privateSource: dbUsed ? "SQLite (1.5 km radius)" : "API (district centroid)",
     hdbSource: hdbFromDb ? "SQLite (1.5 km radius)" : "API (town filter)",
     dbReady: isDbReady(),
+    dbPath: LOCAL_DB_PATH,
+    serverCwd: process.cwd(),
   };
 
   return (
