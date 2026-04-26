@@ -135,7 +135,7 @@ async function downloadAndParseCsv(csvUrl: string): Promise<HdbRow[]> {
   for (let i = 1; i < lines.length; i++) {
     const vals = lines[i].split(",");
     if (vals.length < header.length) continue;
-    const row = Object.fromEntries(header.map((k, j) => [k.trim(), vals[j]?.trim() ?? ""])) as HdbRow;
+    const row = Object.fromEntries(header.map((k, j) => [k.trim(), vals[j]?.trim() ?? ""])) as unknown as HdbRow;
     const year = parseInt((row.month ?? "0000").slice(0, 4), 10);
     if (year >= START_YEAR && year <= CURRENT_YEAR) rows.push(row);
   }
