@@ -25,11 +25,11 @@ export function getDb(): Client | null {
   }
 
   // Fallback: Turso cloud (production / Vercel)
-  if (process.env.TURSO_URL && process.env.TURSO_AUTH_TOKEN) {
-    _client = createClient({
-      url:       process.env.TURSO_URL,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
+  // Accepts TURSO_URL or TURSO_DATABASE_URL (name used by Turso dashboard export)
+  const tursoUrl   = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
+  if (tursoUrl && tursoToken) {
+    _client = createClient({ url: tursoUrl, authToken: tursoToken });
     return _client;
   }
 
@@ -38,5 +38,6 @@ export function getDb(): Client | null {
 
 export function isDbReady(): boolean {
   if (fs.existsSync(LOCAL_DB_PATH)) return true;
-  return !!(process.env.TURSO_URL && process.env.TURSO_AUTH_TOKEN);
+  const tursoUrl = process.env.TURSO_URL || process.env.TURSO_DATABASE_URL;
+  return !!(tursoUrl && process.env.TURSO_AUTH_TOKEN);
 }
