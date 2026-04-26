@@ -1206,10 +1206,24 @@ export default function ResultsDashboard({
             </div>
           </div>
 
-          {/* ── Section 3: Upgrade Suitability Score ── */}
+          {/* ── Section 3: Nearby Private Condos / ECs ── */}
+          {!!postalCode && (
+            <section className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">3</div>
+                <div>
+                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Nearby Private Condos &amp; ECs</h2>
+                  <p className="text-xs text-slate-400">Live OneMap search — adjust radius or search a different area</p>
+                </div>
+              </div>
+              <AreaCondoSearch initialPostalCode={postalCode} />
+            </section>
+          )}
+
+          {/* ── Section 4: Upgrade Suitability Score ── */}
           <section>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">3</div>
+              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">4</div>
               <div>
                 <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Upgrade Suitability Score</h2>
                 <p className="text-xs text-slate-400">Should you upgrade now, wait, or improve your position first?</p>
@@ -1225,20 +1239,6 @@ export default function ResultsDashboard({
               financialProfile={initialFinancialProfile}
             />
           </section>
-
-          {/* ── Section 4: Nearby Private Condos / ECs ── */}
-          {!!postalCode && (
-            <section className="bg-white rounded-xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">4</div>
-                <div>
-                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Nearby Private Condos &amp; ECs</h2>
-                  <p className="text-xs text-slate-400">Live OneMap search — adjust radius or search a different area</p>
-                </div>
-              </div>
-              <AreaCondoSearch initialPostalCode={postalCode} />
-            </section>
-          )}
 
           {/* Footer */}
           <div className="flex justify-between text-[9px] text-slate-400 pt-2 border-t border-slate-200 pb-6">
