@@ -289,7 +289,7 @@ async function queryDb(
 
   // Check table exists and has rows
   try {
-    const countRes = await db.execute("SELECT COUNT(*) as n FROM onemap_condo");
+    const countRes = await db.execute("SELECT COUNT(*) as n FROM private_property_master");
     const count = Number(countRes.rows[0]?.n ?? 0);
     if (count === 0) return null;
 
@@ -297,8 +297,8 @@ async function queryDb(
     const delta = radiusKm / 111.32;
     const res   = await db.execute({
       sql: `
-        SELECT project_name, property_category, address, postal_code, lat, lng
-        FROM onemap_condo
+        SELECT project_name, property_type, address, postal_code, lat, lng
+        FROM private_property_master
         WHERE lat BETWEEN ? AND ?
           AND lng BETWEEN ? AND ?
       `,
@@ -313,7 +313,7 @@ async function queryDb(
       if (dist > radiusKm) continue;
       results.push({
         project_name:      String(r.project_name),
-        property_category: String(r.property_category) as "Condo" | "EC",
+        property_category: String(r.property_type) as "Condo" | "EC",
         address:           String(r.address  ?? ""),
         postal_code:       String(r.postal_code ?? ""),
         lat,
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest) {
   // ── Step 2a: try DB (fast path) ───────────────────────────────────────────
   const dbResults = await queryDb(centre.lat, centre.lng, radiusKm);
   if (dbResults !== null) {
-    console.log(`[area-condos] mode=db_mode — ${dbResults.length} results from onemap_condo`);
+    console.log(`[area-condos] mode=db_mode — ${dbResults.length} results from private_property_master`);
     const response: AreaCondosResponse = {
       centre,
       properties: dbResults,

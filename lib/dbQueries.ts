@@ -119,7 +119,7 @@ export async function getHdbNearby(
 }
 
 // ── Private projects nearby ───────────────────────────────────────────────────
-// Source: onemap_condo table (seeded via `npm run seed:condos` or the /explore page button).
+// Source: private_property_master table (seeded via `npm run seed:condos` or the /explore page button).
 // Ranks by proximity — price/tenure data not available from OneMap seed.
 
 function scoreByDistance(distKm: number): number {
@@ -142,7 +142,7 @@ export async function getPrivateProjectsNearby(
 
   try {
     const result = await db.execute(
-      "SELECT project_name, property_category, address, lat, lng FROM onemap_condo WHERE lat > 0 AND lng > 0",
+      "SELECT project_name, property_type, address, lat, lng FROM private_property_master WHERE lat > 0 AND lng > 0",
     );
 
     const scored: ExtendedProjectSummary[] = result.rows.map((row) => {
@@ -275,7 +275,7 @@ export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number
   try {
     const [h, p] = await Promise.all([
       db.execute("SELECT COUNT(*) as n FROM hdb_tx"),
-      db.execute("SELECT COUNT(*) as n FROM onemap_condo"),
+      db.execute("SELECT COUNT(*) as n FROM private_property_master"),
     ]);
     return { connected: true, hdbCount: n(h.rows[0].n), privateCount: n(p.rows[0].n) };
   } catch {

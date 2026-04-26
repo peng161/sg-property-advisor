@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   try {
     const res = await db.execute({
       sql: `SELECT project_name, address, lat, lng
-            FROM onemap_condo
+            FROM private_property_master
             WHERE lat BETWEEN ? AND ?
               AND lng BETWEEN ? AND ?
               AND lat > 0 AND lng > 0`,

@@ -1,56 +1,60 @@
 /**
- * Seed script — pulls all private condos & ECs across Singapore from OneMap
- * and writes them to the local SQLite database (onemap_condo table).
+ * Seed script — discovers all private condos & ECs in Singapore from OneMap
+ * using broad search terms + confidence scoring.
  *
- * Run once (or to refresh):
- *   npm run seed:condos
+ * Run: npm run seed:condos
  *
- * After seeding, /api/area-condos queries the DB instead of hitting OneMap
- * live on every search — results go from ~20 s to <200 ms.
+ * Writes to:
+ *   private_property_master     — confidence_score >= 3  (used by the app)
+ *   private_property_candidates — confidence_score == 2  (needs manual review)
  *
- * Requires:  ONEMAP_TOKEN in .env.local  (renew every 3 days at developers.onemap.sg)
+ * No hardcoded project names — discovery is purely keyword + scoring.
  */
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
 import path from "path";
-import fs   from "fs";
+import fs from "fs";
 import Database from "better-sqlite3";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Search keywords ───────────────────────────────────────────────────────────
+// Broad project-name fragments capture condos like The Trilinq, Hundred Trees.
+// Strong condo identifiers (condominium, residences…) are kept for maximum recall.
 
-const DB_PATH = path.join(process.cwd(), "data", "sg-property.db");
+const SEARCH_KEYWORDS = [
+  // Strong condo identifiers
+  "executive condominium", "condominium", "residences", "residence",
+  "apartments", "suites", "estate",
+  // Broad project-name fragments
+  "the", "park", "parc", "view", "trees", "tree", "heights", "hill",
+  "crest", "green", "gardens", "valley", "bay", "shore", "towers",
+  "grove", "loft", "casa", "court", "point", "place", "mansion",
+] as const;
 
-const ONEMAP_SEARCH = "https://www.onemap.gov.sg/api/common/elastic/search";
+// ── Classification rules ──────────────────────────────────────────────────────
 
-const PROPERTY_KEYWORDS = [
-  "executive condominium",
-  "condominium",
-  "residences",
-  "residence",
-  "suites",
-  "apartments",
-  "parc",
-  "towers",
-  "estate",
+const REJECT_TERMS = [
+  "HDB", "HOUSING BOARD", "SCHOOL", "MALL", "PLAZA", "INDUSTRIAL",
+  "FACTORY", "WAREHOUSE", "CHURCH", "TEMPLE", "MOSQUE", "CLINIC",
+  "HOSPITAL", "COMMUNITY CENTRE", "OFFICE", "BUILDING", "CENTRE",
 ] as const;
 
 const LANDED_TERMS = [
-  "terrace", "semi-detached", "detached", "bungalow",
-  "cluster house", "good class bungalow", "gcb", "villa",
-  " house", "landed",
-];
+  "TERRACE", "SEMI-DETACHED", "DETACHED", "BUNGALOW", "GCB", "LANDED",
+] as const;
 
-const MAX_PAGES_PER_KEYWORD = 80;  // 80 × 10 = 800 results per keyword
-const PAGE_DELAY_MS          = 120; // stay within OneMap rate limits
+// +3 if any of these appear in building+address
+const HIGH_CONF_TERMS = [
+  "EXECUTIVE CONDOMINIUM", "CONDOMINIUM", "CONDO",
+  "APARTMENT", "RESIDENCES", "SUITES",
+] as const;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface OneMapResult {
   BUILDING:   string;
+  SEARCHVAL:  string;
   ADDRESS:    string;
   POSTAL:     string;
   LATITUDE:   string;
@@ -58,204 +62,330 @@ interface OneMapResult {
   LONGTITUDE: string;
 }
 
-function classifyResult(
-  building: string,
-  address:  string,
-  keyword:  string,
-): { keep: boolean; category: "Condo" | "EC"; rejectReason?: string } {
-  const b     = building.toUpperCase().trim();
+type Bucket = "master" | "candidate" | "reject";
+
+interface Classified {
+  bucket:       Bucket;
+  score:        number;
+  reason:       string;
+  projectName:  string;
+  propertyType: "Condo" | "EC";
+}
+
+interface SeedRecord {
+  project_name:     string;
+  property_type:    "Condo" | "EC";
+  address:          string;
+  postal_code:      string;
+  lat:              number;
+  lng:              number;
+  confidence_score: number;
+  source_keyword:   string;
+  reason:           string;
+}
+
+// ── Classifier ────────────────────────────────────────────────────────────────
+
+export function classify(
+  building: string, searchval: string, address: string,
+  postal: string, lat: number, lng: number,
+): Classified {
+  const rawBuilding = (building || searchval || "").trim();
+  const b     = rawBuilding.toUpperCase();
   const a     = address.toUpperCase().trim();
   const combo = `${b} ${a}`;
 
-  if (combo.includes("HDB") || combo.includes("HOUSING BOARD"))
-    return { keep: false, category: "Condo", rejectReason: "HDB" };
-  if (!b && (a.startsWith("BLK ") || a.startsWith("BLOCK ")))
-    return { keep: false, category: "Condo", rejectReason: "HDB block" };
-  if (combo.includes("HDB APARTMENT"))
-    return { keep: false, category: "Condo", rejectReason: "HDB apartment" };
-
+  // ── Hard rejects ─────────────────────────────────────────────────────────
+  for (const term of REJECT_TERMS) {
+    if (combo.includes(term)) {
+      return { bucket: "reject", score: 0, reason: `reject: "${term}"`, projectName: rawBuilding, propertyType: "Condo" };
+    }
+  }
   for (const term of LANDED_TERMS) {
-    if (combo.includes(term.toUpperCase()))
-      return { keep: false, category: "Condo", rejectReason: `landed (${term})` };
+    if (combo.includes(term)) {
+      return { bucket: "reject", score: 0, reason: `landed: "${term}"`, projectName: rawBuilding, propertyType: "Condo" };
+    }
   }
 
-  if (!b) return { keep: false, category: "Condo", rejectReason: "no building name" };
+  // ── Positive scoring ──────────────────────────────────────────────────────
+  let score = 0;
+  const reasons: string[] = [];
+  let isEC = false;
 
-  const isEc =
-    keyword === "executive condominium" ||
-    combo.includes("EXECUTIVE CONDOMINIUM") ||
-    /\bEC\b/.test(b);
+  // +3 if contains a strong condo/residences indicator
+  for (const term of HIGH_CONF_TERMS) {
+    if (combo.includes(term)) {
+      score += 3;
+      reasons.push(`+3 "${term}"`);
+      if (term === "EXECUTIVE CONDOMINIUM") isEC = true;
+      break; // count only once
+    }
+  }
 
-  return { keep: true, category: isEc ? "EC" : "Condo" };
+  // +2 if BUILDING is a proper named project (not a block or road reference)
+  const isNamed =
+    rawBuilding.length > 0 &&
+    !/^(BLK|BLOCK)\s*\d/i.test(rawBuilding) &&
+    !/^\d/.test(rawBuilding) &&
+    /[A-Za-z]{3,}/.test(rawBuilding);
+
+  if (isNamed) {
+    score += 2;
+    reasons.push("+2 named project");
+  }
+
+  // +1 if name has 2–4 words (typical residential project pattern)
+  const wordCount = b.split(/\s+/).filter(Boolean).length;
+  if (wordCount >= 2 && wordCount <= 4) {
+    score += 1;
+    reasons.push("+1 2-4 words");
+  }
+
+  // +1 if valid Singapore postal code + coordinates
+  const cleanPostal = postal.replace(/\D/g, "");
+  if (cleanPostal.length === 6 && lat && lng) {
+    score += 1;
+    reasons.push("+1 postal+coords");
+  }
+
+  const projectName   = rawBuilding || address.split(" ").slice(0, 4).join(" ");
+  const propertyType: "Condo" | "EC" = isEC ? "EC" : "Condo";
+  const reasonStr     = reasons.join(", ") || "no positive signals";
+
+  if (score < 2)  return { bucket: "reject",    score, reason: `score ${score}: ${reasonStr}`, projectName, propertyType };
+  if (score === 2) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
+  return                 { bucket: "master",     score, reason: reasonStr,                       projectName, propertyType };
 }
 
-// ── DB setup ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
+
+function normalize(name: string): string {
+  return name.toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+// ── DB ────────────────────────────────────────────────────────────────────────
+
+const DB_PATH = path.join(process.cwd(), "data", "sg-property.db");
 
 function openDb(): Database.Database {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
-
   db.exec(`
-    CREATE TABLE IF NOT EXISTS onemap_condo (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_name      TEXT NOT NULL,
-      property_category TEXT NOT NULL,
-      address           TEXT,
-      postal_code       TEXT,
-      lat               REAL NOT NULL,
-      lng               REAL NOT NULL,
-      seeded_at         TEXT NOT NULL,
+    CREATE TABLE IF NOT EXISTS private_property_master (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name     TEXT    NOT NULL,
+      property_type    TEXT    NOT NULL DEFAULT 'Condo',
+      address          TEXT,
+      postal_code      TEXT,
+      lat              REAL    NOT NULL,
+      lng              REAL    NOT NULL,
+      confidence_score INTEGER NOT NULL,
+      source_keyword   TEXT,
+      seeded_at        TEXT    NOT NULL,
       UNIQUE(project_name, postal_code)
     );
-    CREATE INDEX IF NOT EXISTS idx_onemap_condo_loc
-      ON onemap_condo(lat, lng);
+    CREATE INDEX IF NOT EXISTS idx_ppm_loc ON private_property_master(lat, lng);
+
+    CREATE TABLE IF NOT EXISTS private_property_candidates (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name     TEXT    NOT NULL,
+      property_type    TEXT    NOT NULL DEFAULT 'Condo',
+      address          TEXT,
+      postal_code      TEXT,
+      lat              REAL    NOT NULL,
+      lng              REAL    NOT NULL,
+      confidence_score INTEGER NOT NULL,
+      reason           TEXT,
+      source_keyword   TEXT,
+      seeded_at        TEXT    NOT NULL,
+      UNIQUE(project_name, postal_code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ppc_loc ON private_property_candidates(lat, lng);
   `);
   return db;
 }
 
-// ── Fetch one keyword, all pages ─────────────────────────────────────────────
+// ── OneMap fetch ──────────────────────────────────────────────────────────────
 
-interface FetchedProperty {
-  project_name:      string;
-  property_category: "Condo" | "EC";
-  address:           string;
-  postal_code:       string;
-  lat:               number;
-  lng:               number;
-}
+const ONEMAP_SEARCH = "https://www.onemap.gov.sg/api/common/elastic/search";
+const MAX_PAGES     = 80;
+const PAGE_DELAY    = 120;
 
 async function fetchKeyword(
   keyword: string,
   token:   string,
-): Promise<FetchedProperty[]> {
-  const found: FetchedProperty[] = [];
-  const headers: Record<string, string> = token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
+): Promise<{ masters: SeedRecord[]; candidates: SeedRecord[]; totalRaw: number; rejected: number }> {
+  const masters:    SeedRecord[] = [];
+  const candidates: SeedRecord[] = [];
+  let totalRaw = 0;
+  let rejected = 0;
 
-  for (let page = 1; page <= MAX_PAGES_PER_KEYWORD; page++) {
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const url =
       `${ONEMAP_SEARCH}?searchVal=${encodeURIComponent(keyword)}` +
       `&returnGeom=Y&getAddrDetails=Y&pageNum=${page}`;
 
-    let data: { found?: number; totalNumPages?: number; results?: OneMapResult[] };
+    let data: { totalNumPages?: number; results?: OneMapResult[] };
     try {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) {
-        console.warn(`  keyword="${keyword}" page=${page} HTTP ${res.status} — stopping`);
-        break;
-      }
+      if (!res.ok) { process.stdout.write(`\n  ⚠ HTTP ${res.status} on page ${page}`); break; }
       data = await res.json() as typeof data;
-    } catch (err) {
-      console.warn(`  keyword="${keyword}" page=${page} fetch error — stopping`);
+    } catch {
+      process.stdout.write(`\n  ⚠ fetch error on page ${page}`);
       break;
     }
 
-    const pageResults: OneMapResult[] = data.results ?? [];
-    const totalPages = data.totalNumPages ?? 1;
-
-    process.stdout.write(
-      `\r  [${keyword}] page ${page}/${totalPages} — ${found.length} kept so far`
-    );
-
-    if (!pageResults.length) break;
+    const pageResults = data.results ?? [];
+    const totalPages  = data.totalNumPages ?? 1;
+    totalRaw += pageResults.length;
 
     for (const r of pageResults) {
       const lat = Number(r.LATITUDE);
       const lng = Number(r.LONGITUDE || r.LONGTITUDE);
-      if (!lat || !lng) continue;
+      if (!lat || !lng) { rejected++; continue; }
 
-      const building = (r.BUILDING || "").trim();
-      const address  = (r.ADDRESS  || "").trim();
-      const postal   = (r.POSTAL   || "").replace(/\D/g, "");
+      const building  = (r.BUILDING  || "").trim();
+      const searchval = (r.SEARCHVAL || "").trim();
+      const address   = (r.ADDRESS   || "").trim();
+      const postal    = (r.POSTAL    || "").replace(/\D/g, "");
 
-      const { keep, category } = classifyResult(building, address, keyword);
-      if (!keep) continue;
+      const c = classify(building, searchval, address, postal, lat, lng);
+      if (c.bucket === "reject") { rejected++; continue; }
 
-      found.push({
-        project_name:      building || address.split(" ").slice(0, 4).join(" "),
-        property_category: category,
+      const record: SeedRecord = {
+        project_name:     c.projectName,
+        property_type:    c.propertyType,
         address,
-        postal_code:       postal,
+        postal_code:      postal,
         lat,
         lng,
-      });
+        confidence_score: c.score,
+        source_keyword:   keyword,
+        reason:           c.reason,
+      };
+
+      if (c.bucket === "master") masters.push(record);
+      else                       candidates.push(record);
     }
 
-    if (page >= totalPages) break;
-    await sleep(PAGE_DELAY_MS);
+    process.stdout.write(
+      `\r  [${keyword}] page ${page}/${totalPages} — raw:${totalRaw} master:${masters.length} cand:${candidates.length} rej:${rejected}    `
+    );
+
+    if (!pageResults.length || page >= totalPages) break;
+    await sleep(PAGE_DELAY);
   }
 
   process.stdout.write("\n");
-  return found;
+  return { masters, candidates, totalRaw, rejected };
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
   const token = process.env.ONEMAP_TOKEN ?? "";
-  if (!token) {
-    console.warn("⚠  ONEMAP_TOKEN not set — requests will be unauthenticated (may hit rate limits faster)");
-  }
+  if (!token) console.warn("⚠  ONEMAP_TOKEN not set — unauthenticated (may hit rate limits)");
 
-  console.log(`Opening SQLite: ${DB_PATH}\n`);
+  console.log(`\nOpening SQLite: ${DB_PATH}`);
   const db = openDb();
 
-  const seededAt = new Date().toISOString();
-  const allRaw: FetchedProperty[] = [];
+  const seededAt       = new Date().toISOString();
+  const allMasters:     SeedRecord[] = [];
+  const allCandidates:  SeedRecord[] = [];
+  let   grandTotalRaw  = 0;
+  let   grandRejected  = 0;
 
-  for (const keyword of PROPERTY_KEYWORDS) {
-    console.log(`\nSearching keyword: "${keyword}"`);
-    const results = await fetchKeyword(keyword, token);
-    console.log(`  → ${results.length} kept for "${keyword}"`);
-    allRaw.push(...results);
+  for (const keyword of SEARCH_KEYWORDS) {
+    console.log(`\n▸ Keyword: "${keyword}"`);
+    const { masters, candidates, totalRaw, rejected } = await fetchKeyword(keyword, token);
+    allMasters.push(...masters);
+    allCandidates.push(...candidates);
+    grandTotalRaw += totalRaw;
+    grandRejected += rejected;
+    console.log(`  ✓ "${keyword}": ${masters.length} master, ${candidates.length} cand, ${rejected} rejected of ${totalRaw} raw`);
   }
 
-  // Deduplicate on (project_name, postal_code)
-  const seen = new Set<string>();
-  const deduped: FetchedProperty[] = [];
-  for (const p of allRaw) {
-    const key = `${p.project_name.toUpperCase()}|${p.postal_code}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(p);
+  // ── Deduplicate ───────────────────────────────────────────────────────────
+
+  console.log("\nDeduplicating…");
+
+  const masterMap = new Map<string, SeedRecord>();
+  for (const r of allMasters) {
+    const key = `${normalize(r.project_name)}|${r.postal_code}`;
+    const ex  = masterMap.get(key);
+    if (!ex || r.confidence_score > ex.confidence_score) masterMap.set(key, r);
   }
+  const dedupedMasters = [...masterMap.values()];
 
-  console.log(`\nTotal raw: ${allRaw.length}  After dedup: ${deduped.length}`);
-  console.log("Writing to onemap_condo table…");
+  const candidateMap = new Map<string, SeedRecord>();
+  for (const r of allCandidates) {
+    const key = `${normalize(r.project_name)}|${r.postal_code}`;
+    if (masterMap.has(key)) continue;        // already promoted to master
+    if (!candidateMap.has(key)) candidateMap.set(key, r);
+  }
+  const dedupedCandidates = [...candidateMap.values()];
 
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO onemap_condo
-      (project_name, property_category, address, postal_code, lat, lng, seeded_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+  // ── Write to DB ───────────────────────────────────────────────────────────
+
+  console.log(`Writing ${dedupedMasters.length} master records…`);
+  const insertMaster = db.prepare(`
+    INSERT OR REPLACE INTO private_property_master
+      (project_name, property_type, address, postal_code, lat, lng,
+       confidence_score, source_keyword, seeded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  db.transaction((rows: SeedRecord[]) => {
+    for (const r of rows)
+      insertMaster.run(r.project_name, r.property_type, r.address, r.postal_code,
+                       r.lat, r.lng, r.confidence_score, r.source_keyword, seededAt);
+  })(dedupedMasters);
 
-  const insertMany = db.transaction((rows: FetchedProperty[]) => {
-    for (const p of rows) {
-      insert.run(p.project_name, p.property_category, p.address, p.postal_code, p.lat, p.lng, seededAt);
-    }
-    return rows.length;
-  });
+  console.log(`Writing ${dedupedCandidates.length} candidate records…`);
+  const insertCandidate = db.prepare(`
+    INSERT OR IGNORE INTO private_property_candidates
+      (project_name, property_type, address, postal_code, lat, lng,
+       confidence_score, reason, source_keyword, seeded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  db.transaction((rows: SeedRecord[]) => {
+    for (const r of rows)
+      insertCandidate.run(r.project_name, r.property_type, r.address, r.postal_code,
+                          r.lat, r.lng, r.confidence_score, r.reason, r.source_keyword, seededAt);
+  })(dedupedCandidates);
 
-  const written = insertMany(deduped);
-  const total = (db.prepare("SELECT COUNT(*) as n FROM onemap_condo").get() as { n: number }).n;
-
+  const masterTotal    = (db.prepare("SELECT COUNT(*) as n FROM private_property_master").get() as { n: number }).n;
+  const candidateTotal = (db.prepare("SELECT COUNT(*) as n FROM private_property_candidates").get() as { n: number }).n;
   db.close();
 
-  const condoCount = deduped.filter((p) => p.property_category === "Condo").length;
-  const ecCount    = deduped.filter((p) => p.property_category === "EC").length;
+  // ── Report ────────────────────────────────────────────────────────────────
 
-  console.log(`\n✓ Seed complete`);
-  console.log(`  Written this run:  ${written}`);
-  console.log(`  Total in table:    ${total}`);
-  console.log(`  Condos:            ${condoCount}`);
-  console.log(`  ECs:               ${ecCount}`);
-  console.log(`  Database:          ${DB_PATH}`);
-  console.log(`\nNext steps:`);
-  console.log(`  • The area-condos API will now use the DB automatically.`);
-  console.log(`  • Re-run this script every few months or after renewing your OneMap token.`);
+  console.log("\n══ Seed Report ══════════════════════════════════════════════════");
+  console.log(`  Total raw OneMap results : ${grandTotalRaw.toLocaleString()}`);
+  console.log(`  Accepted  (master ≥3)   : ${dedupedMasters.length.toLocaleString()} this run`);
+  console.log(`  Candidate (score =2)    : ${dedupedCandidates.length.toLocaleString()} this run`);
+  console.log(`  Rejected  (score <2)    : ${grandRejected.toLocaleString()}`);
+  console.log(`  DB master  total         : ${masterTotal.toLocaleString()}`);
+  console.log(`  DB candidate total       : ${candidateTotal.toLocaleString()}`);
+  console.log(`  Database                 : ${DB_PATH}`);
+
+  if (dedupedCandidates.length > 0) {
+    console.log("\n── Top 50 candidates (needs review) ─────────────────────────────");
+    const top50 = [...dedupedCandidates]
+      .sort((a, b) => b.confidence_score - a.confidence_score)
+      .slice(0, 50);
+    for (const c of top50) {
+      console.log(`  [${c.confidence_score}] ${c.project_name.padEnd(42)} ${c.postal_code}  ${c.reason}`);
+    }
+  }
+
+  console.log("\n✓ Seed complete");
+  console.log("  The app now reads from private_property_master automatically.");
 }
 
 main().catch((e) => { console.error("Seed failed:", e); process.exit(1); });

@@ -10,10 +10,10 @@ const AreaCondoSearch = dynamic(
 
 type SeedEvent =
   | { type: "keyword_start"; keyword: string }
-  | { type: "page"; keyword: string; page: number; totalPages: number; keptSoFar: number }
-  | { type: "keyword_done"; keyword: string; kept: number; runningTotal: number }
-  | { type: "inserting"; count: number }
-  | { type: "done"; written: number; total: number; condos: number; ecs: number }
+  | { type: "page"; keyword: string; page: number; totalPages: number; master: number; candidate: number; rejected: number }
+  | { type: "keyword_done"; keyword: string; master: number; candidate: number }
+  | { type: "inserting"; masters: number; candidates: number }
+  | { type: "done"; written_master: number; written_cand: number; total_master: number; total_cand: number }
   | { type: "error"; message: string }
   | { type: "page_error"; keyword: string; page: number; status?: number; error?: string };
 
@@ -65,21 +65,21 @@ export default function ExplorePage() {
                 addLog(`\n▸ "${ev.keyword}"`);
                 break;
               case "page":
-                addLog(`  page ${ev.page}/${ev.totalPages} — ${ev.keptSoFar} kept so far`);
+                addLog(`  page ${ev.page}/${ev.totalPages} — master:${ev.master} cand:${ev.candidate} rej:${ev.rejected}`);
                 break;
               case "keyword_done":
-                addLog(`  ✓ kept ${ev.kept}  (running total: ${ev.runningTotal})`);
+                addLog(`  ✓ master:${ev.master}  candidate:${ev.candidate}`);
                 break;
               case "inserting":
-                addLog(`\nInserting ${ev.count} records into DB (after dedup)…`);
+                addLog(`\nInserting ${ev.masters} master + ${ev.candidates} candidate records (after dedup)…`);
                 break;
               case "done":
                 addLog(
                   `\n✅ Seed complete!\n` +
-                  `   Written this run : ${ev.written}\n` +
-                  `   Total in DB      : ${ev.total}\n` +
-                  `   Condos           : ${ev.condos}\n` +
-                  `   ECs              : ${ev.ecs}`
+                  `   Master written   : ${ev.written_master}\n` +
+                  `   Candidates       : ${ev.written_cand}\n` +
+                  `   Total master DB  : ${ev.total_master}\n` +
+                  `   Total cand DB    : ${ev.total_cand}`
                 );
                 break;
               case "error":
@@ -125,9 +125,9 @@ export default function ExplorePage() {
           {showSeed && (
             <div className="px-5 py-4 border-t border-slate-100">
               <p className="text-xs text-slate-500 mb-3">
-                Pulls all private condos &amp; ECs from OneMap and writes them to the local SQLite
-                database. Takes 2–5 minutes. Run once — searches then respond in &lt;400 ms instead
-                of ~20 s.
+                Pulls all private condos &amp; ECs from OneMap using broad keyword search + confidence
+                scoring. Writes to <code>private_property_master</code> (score ≥3) and{" "}
+                <code>private_property_candidates</code> (score =2). Takes 5–10 minutes. Run once.
               </p>
 
               <button
