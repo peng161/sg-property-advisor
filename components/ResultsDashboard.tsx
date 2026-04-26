@@ -1060,7 +1060,7 @@ export default function ResultsDashboard({
             </div>
           </section>
 
-          {/* ── Section 2: Top Properties + Map ── */}
+          {/* ── Section 2: Properties + Map (context-sensitive by upgrade path) ── */}
           <div className="flex flex-col md:flex-row gap-4">
 
             {/* Properties list */}
@@ -1237,31 +1237,26 @@ export default function ResultsDashboard({
             <div className="w-full md:w-80 shrink-0">
               <MapWrapper
                 lat={lat} lng={lng} postalCode={postalCode}
-                properties={[]}
+                properties={selectedUpgrade === "Private Condo" ? displayedListings : []}
                 selectedProject={selectedProject}
                 onSelectProject={setSelectedProject}
               />
             </div>
           </div>
 
-          {/* ── Section 3: Nearby Private Condos / ECs ── */}
-          {!!postalCode && (
-            <section className="bg-white rounded-xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">3</div>
-                <div>
-                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Nearby Private Condos &amp; ECs</h2>
-                  <p className="text-xs text-slate-400">Live OneMap search — adjust radius or search a different area</p>
-                </div>
-              </div>
+          {/* Nearby condos search — only for Private Condo path */}
+          {selectedUpgrade === "Private Condo" && !!postalCode && (
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <p className="font-semibold text-slate-800 text-sm mb-1">Nearby Condos &amp; ECs</p>
+              <p className="text-xs text-slate-400 mb-4">Live OneMap search — adjust radius or search a different area</p>
               <AreaCondoSearch initialPostalCode={postalCode} />
-            </section>
+            </div>
           )}
 
-          {/* ── Section 4: Upgrade Suitability Score ── */}
+          {/* ── Section 3: Upgrade Suitability Score ── */}
           <section>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">4</div>
+              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">3</div>
               <div>
                 <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Upgrade Suitability Score</h2>
                 <p className="text-xs text-slate-400">Should you upgrade now, wait, or improve your position first?</p>
