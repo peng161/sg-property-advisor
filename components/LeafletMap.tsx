@@ -38,10 +38,13 @@ function homeIcon(L: typeof import("leaflet")) {
   });
 }
 
-function propIcon(L: typeof import("leaflet"), rank: number, isTop: boolean, isSelected: boolean) {
-  const bg   = isSelected ? C.violet : isTop ? C.emerald : C.indigo;
-  const size = isSelected ? 34 : 28;
-  const half = size / 2;
+function propIcon(L: typeof import("leaflet"), rank: number, score: number, isSelected: boolean) {
+  const bg     = isSelected ? C.violet : score >= 80 ? C.emerald : score >= 65 ? "#f59e0b" : "#ef4444";
+  const size   = isSelected ? 34 : 28;
+  const half   = size / 2;
+  const shadow = isSelected
+    ? `0 0 0 3px ${C.violet}44, 0 2px 8px rgba(124,58,237,.5)`
+    : "0 2px 6px rgba(0,0,0,.3)";
   return L.divIcon({
     className: "",
     iconSize:  [size, size],
@@ -50,7 +53,7 @@ function propIcon(L: typeof import("leaflet"), rank: number, isTop: boolean, isS
       width:${size}px;height:${size}px;border-radius:50%;
       background:${bg};border:2px solid ${C.white};
       display:flex;align-items:center;justify-content:center;
-      box-shadow:0 2px 6px rgba(0,0,0,.3);
+      box-shadow:${shadow};
       font-size:${isSelected ? 13 : 11}px;font-weight:800;color:${C.white};
     ">${rank}</div>`,
   });
@@ -121,10 +124,12 @@ function popupHtml(rank: number, p: ExtendedProjectSummary): string {
 
 function legendHtml(): string {
   const items = [
-    { color: C.indigo,  label: "Home" },
-    { color: C.emerald, label: "Top/Condo" },
-    { color: C.violet,  label: "Selected" },
-    { color: "#059669", label: "EC" },
+    { color: C.indigo,   label: "Your Home" },
+    { color: C.emerald,  label: "Score ≥80" },
+    { color: "#f59e0b",  label: "Score 65–79" },
+    { color: "#ef4444",  label: "Score <65" },
+    { color: C.violet,   label: "Selected" },
+    { color: "#059669",  label: "Condo/EC" },
   ];
   return `
     <div style="
@@ -368,9 +373,8 @@ export default function LeafletMap({
       props.forEach((p, i) => {
         if (p.projectLat === null || p.projectLng === null) return;
         const rank       = i + 1;
-        const isTop      = rank === 1;
         const isSelected = p.project === selected;
-        const icon       = propIcon(L, rank, isTop, isSelected);
+        const icon       = propIcon(L, rank, p.propertyScore, isSelected);
 
         const marker = L.marker([p.projectLat!, p.projectLng!], { icon })
           .addTo(layer)
@@ -383,6 +387,16 @@ export default function LeafletMap({
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [properties, selectedProject, mapReady]);
+
+  // ── Effect 4: Pan map to selected project ──────────────────────────────────
+  useEffect(() => {
+    if (!selectedProject || !mapRef.current) return;
+    const p = properties.find((x) => x.project === selectedProject);
+    if (p?.projectLat && p?.projectLng) {
+      mapRef.current.setView([p.projectLat, p.projectLng], 15, { animate: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject]);
 
   if (!hasCoords) {
     return (
