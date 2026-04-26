@@ -119,36 +119,48 @@ export async function getHdbNearby(
 }
 
 // ── Private projects nearby ───────────────────────────────────────────────────
+// Source: onemap_condo table (seeded via `npm run seed:condos` or the /explore page button).
+// Ranks by proximity — price/tenure data not available from OneMap seed.
+
+function scoreByDistance(distKm: number): number {
+  if (distKm < 0.5)  return 90;
+  if (distKm < 1.0)  return 80;
+  if (distKm < 1.5)  return 70;
+  if (distKm < 2.0)  return 60;
+  if (distKm < 5.0)  return 45;
+  if (distKm < 10.0) return 30;
+  return 20;
+}
 
 export async function getPrivateProjectsNearby(
-  lat: number, lng: number, budget: number, limit = 15,
+  lat: number, lng: number, _budget: number, limit = 15,
 ): Promise<{ projects: ExtendedProjectSummary[]; fromDb: boolean; count: number }> {
   const db = getDb();
   if (!db) return { projects: [], fromDb: false, count: 0 };
 
   try {
-    const result = await db.execute("SELECT * FROM private_project");
+    const result = await db.execute(
+      "SELECT project_name, property_category, address, lat, lng FROM onemap_condo WHERE lat > 0 AND lng > 0",
+    );
 
     const scored: ExtendedProjectSummary[] = result.rows.map((row) => {
       const rowLat = n(row.lat);
       const rowLng = n(row.lng);
       const distKm = Math.round(haversineKm(lat, lng, rowLat, rowLng) * 10) / 10;
-      const minP   = n(row.min_price);
-      const tenure = s(row.tenure);
       return {
-        project:       s(row.project),
-        street:        s(row.street),
-        tenure,
-        marketSegment: (s(row.market_segment) || "OCR") as "OCR" | "RCR" | "CCR",
-        minPrice:      minP,
-        maxPrice:      n(row.max_price),
-        medianPsm:     n(row.median_psm),
-        txCount:       n(row.tx_count),
-        latestDate:    s(row.latest_date),
-        minSqm:        n(row.min_sqm),
-        maxSqm:        n(row.max_sqm),
-        propertyScore: scorePrivate(minP, tenure, n(row.tx_count), n(row.trend_3y), budget, distKm),
-        trend3Y:       n(row.trend_3y),
+        project:       s(row.project_name),
+        street:        s(row.address),
+        tenure:        "Unknown",
+        marketSegment: "OCR" as const,
+        minPrice:      0,
+        maxPrice:      0,
+        medianPsm:     0,
+        txCount:       0,
+        latestDate:    "",
+        minSqm:        0,
+        maxSqm:        0,
+        propertyScore: scoreByDistance(distKm),
+        trend3Y:       0,
         distanceKm:    distKm,
         projectLat:    rowLat,
         projectLng:    rowLng,
@@ -257,7 +269,7 @@ export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number
   try {
     const [h, p] = await Promise.all([
       db.execute("SELECT COUNT(*) as n FROM hdb_tx"),
-      db.execute("SELECT COUNT(*) as n FROM private_project"),
+      db.execute("SELECT COUNT(*) as n FROM onemap_condo"),
     ]);
     return { connected: true, hdbCount: n(h.rows[0].n), privateCount: n(p.rows[0].n) };
   } catch {

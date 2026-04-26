@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getDb } from "@/lib/sqlite";
+import { haversineKm } from "@/lib/dbQueries";
 
 export const dynamic = "force-dynamic";
 
@@ -29,38 +30,37 @@ export async function GET(req: NextRequest) {
   }
 
   const radiusKm = radius / 1000;
+  const delta    = radiusKm / 111.32;
 
   try {
-    // Haversine formula implemented in SQLite arithmetic
     const res = await db.execute({
-      sql: `
-        SELECT
-          project, street, district, market_segment, lat, lng,
-          ROUND(
-            6371 * 2 * asin(sqrt(
-              (sin(((lat  - ?) * 0.017453293) / 2) * sin(((lat  - ?) * 0.017453293) / 2)) +
-              cos(? * 0.017453293) * cos(lat * 0.017453293) *
-              (sin(((lng  - ?) * 0.017453293) / 2) * sin(((lng  - ?) * 0.017453293) / 2))
-            )),
-          2) AS distance_km
-        FROM private_project
-        WHERE lat IS NOT NULL AND lng IS NOT NULL AND lat > 0 AND lng > 0
-        HAVING distance_km <= ?
-        ORDER BY distance_km ASC
-        LIMIT 60
-      `,
-      args: [lat, lat, lat, lng, lng, radiusKm],
+      sql: `SELECT project_name, address, lat, lng
+            FROM onemap_condo
+            WHERE lat BETWEEN ? AND ?
+              AND lng BETWEEN ? AND ?
+              AND lat > 0 AND lng > 0`,
+      args: [lat - delta, lat + delta, lng - delta, lng + delta],
     });
 
-    const projects: NearbyProject[] = res.rows.map((r) => ({
-      project:        String(r.project),
-      street:         String(r.street  ?? ""),
-      district:       String(r.district ?? ""),
-      market_segment: String(r.market_segment ?? "OCR"),
-      lat:            Number(r.lat),
-      lng:            Number(r.lng),
-      distance_km:    Number(r.distance_km),
-    }));
+    const projects: NearbyProject[] = res.rows
+      .map((r) => {
+        const pLat = Number(r.lat);
+        const pLng = Number(r.lng);
+        const distKm = Math.round(haversineKm(lat, lng, pLat, pLng) * 100) / 100;
+        if (distKm > radiusKm) return null;
+        return {
+          project:        String(r.project_name),
+          street:         String(r.address ?? ""),
+          district:       "",
+          market_segment: "OCR",
+          lat:            pLat,
+          lng:            pLng,
+          distance_km:    distKm,
+        };
+      })
+      .filter((r): r is NearbyProject => r !== null)
+      .sort((a, b) => a.distance_km - b.distance_km)
+      .slice(0, 60);
 
     return Response.json({ projects });
   } catch (err) {
