@@ -1,5 +1,20 @@
 // Finds private condos and ECs near a searched area using OneMap only.
 // No fallback to hardcoded data — returns [] if nothing found.
+//
+// MODE: search_keyword_mode
+//
+// OneMap Themes API was fully audited (all 163 public themes as of 2026-04-26).
+// No theme exists for private condominiums, ECs, or private residential properties.
+// The only residential-adjacent themes are:
+//   • hdb_active_blk_p  — HDB public housing blocks only
+//   • ura_project_public_pl — URA infrastructure construction projects (stale, not buildings)
+//   • ura_popspoints_pt  — Privately Owned Public Spaces (outdoor civic plazas, not dwellings)
+// Conclusion: the Themes API cannot be used for this feature.
+//
+// This route uses the elastic/search API with property-type keywords as search terms.
+// Buildings that contain "CONDOMINIUM" / "EXECUTIVE CONDOMINIUM" / etc. in their
+// BUILDING field are condos/ECs by definition (they are registered under those names).
+// Classification is deterministic — no inference, no guessing.
 
 import { type NextRequest } from "next/server";
 
@@ -264,6 +279,8 @@ async function searchKeyword(
 // ── GET handler ───────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  console.log("[area-condos] mode=search_keyword_mode (OneMap Themes API has no private-residential layer)");
+
   const sp      = req.nextUrl.searchParams;
   const query   = sp.get("query")?.trim() ?? "";
   const radiusM = Math.max(250, Math.min(5000, Number(sp.get("radius") ?? 1500)));
