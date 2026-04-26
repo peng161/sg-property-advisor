@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
+import type { AreaCondoProperty } from "@/app/api/area-condos/route";
 import type { HdbResaleRecord } from "@/lib/fetchHdb";
 import type { FinancialProfile } from "@/lib/myinfo/types";
 import FinancialProfilePanel from "./FinancialProfilePanel";
@@ -569,12 +570,29 @@ function MapWrapper({
   selectedProject: string | null;
   onSelectProject: (project: string) => void;
 }) {
+  const [nearbyCondos, setNearbyCondos] = useState<AreaCondoProperty[]>([]);
+
+  useEffect(() => {
+    if (!postalCode) return;
+    fetch(`/api/area-condos?query=${encodeURIComponent(postalCode)}&radius=1500`)
+      .then((r) => r.json())
+      .then((data) => setNearbyCondos(Array.isArray(data.properties) ? data.properties : []))
+      .catch(() => {});
+  }, [postalCode]);
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex flex-col" style={{ minHeight: 420 }}>
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <div>
           <p className="font-semibold text-slate-800 text-sm">Property Map</p>
-          <p className="text-[10px] text-slate-400">Your neighbourhood · 1.5 km radius</p>
+          <p className="text-[10px] text-slate-400">
+            Your neighbourhood · 1.5 km radius
+            {nearbyCondos.length > 0 && (
+              <span className="ml-2 text-indigo-500 font-semibold">
+                · {nearbyCondos.length} condos nearby
+              </span>
+            )}
+          </p>
         </div>
         <div className="text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
           Postal: {postalCode || "—"}
@@ -584,6 +602,7 @@ function MapWrapper({
         <LeafletMap
           lat={lat} lng={lng} postalCode={postalCode}
           properties={properties}
+          nearbyCondos={nearbyCondos}
           selectedProject={selectedProject}
           onSelectProject={onSelectProject}
         />

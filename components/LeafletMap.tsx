@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ExtendedProjectSummary } from "./ResultsDashboard";
+import type { AreaCondoProperty } from "@/app/api/area-condos/route";
 
 // ── Theme tokens (match app) ────────────────────────────────────────────────
 const C = {
@@ -120,10 +121,12 @@ function popupHtml(rank: number, p: ExtendedProjectSummary): string {
 
 function legendHtml(): string {
   const items = [
-    { color: C.indigo,  label: "Your Home" },
-    { color: C.emerald, label: "Top Ranked" },
-    { color: C.indigo,  label: "Recommended" },
-    { color: C.violet,  label: "Selected" },
+    { color: C.indigo,   label: "Your Home" },
+    { color: C.emerald,  label: "Top Ranked" },
+    { color: C.indigo,   label: "Recommended" },
+    { color: C.violet,   label: "Selected" },
+    { color: "#94a3b8",  label: "Condo nearby" },
+    { color: C.emerald,  label: "EC nearby" },
   ];
   return `
     <div style="
@@ -151,12 +154,13 @@ export interface LeafletMapProps {
   lng:              number;
   postalCode:       string;
   properties:       ExtendedProjectSummary[];
+  nearbyCondos?:    AreaCondoProperty[];
   selectedProject:  string | null;
   onSelectProject:  (project: string) => void;
 }
 
 export default function LeafletMap({
-  lat, lng, postalCode, properties, selectedProject, onSelectProject,
+  lat, lng, postalCode, properties, nearbyCondos = [], selectedProject, onSelectProject,
 }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<import("leaflet").Map | null>(null);
@@ -254,7 +258,48 @@ export default function LeafletMap({
           </div>
         `, { maxWidth: 240 });
 
-      // Property markers
+      // Nearby condos from DB — small background dots (rendered first, so top-7 sit on top)
+      const topLatLngs = new Set(
+        properties
+          .filter((p) => p.projectLat !== null && p.projectLng !== null)
+          .map((p) => `${p.projectLat!.toFixed(4)},${p.projectLng!.toFixed(4)}`)
+      );
+
+      nearbyCondos.forEach((c) => {
+        // Skip if same location as a top-7 marker (avoid double dot)
+        if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
+
+        const isEC  = c.property_category === "EC";
+        const color = isEC ? C.emerald : "#94a3b8"; // slate-400 for condos, emerald for ECs
+        const icon  = L.divIcon({
+          className:  "",
+          iconSize:   [18, 18],
+          iconAnchor: [9, 9],
+          html: `<div style="
+            width:18px;height:18px;border-radius:50%;
+            background:${color};border:1.5px solid ${C.white};
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 1px 3px rgba(0,0,0,.2);
+            font-size:6px;font-weight:800;color:${C.white};
+          ">${isEC ? "EC" : "C"}</div>`,
+        });
+
+        L.marker([c.lat, c.lng], { icon, zIndexOffset: -100 })
+          .addTo(map)
+          .bindPopup(
+            `<div style="font-family:system-ui,sans-serif;padding:8px 10px;background:${C.bg};border-radius:10px;">
+              <div style="font-weight:700;font-size:12px;color:${C.text};margin-bottom:3px;">${c.project_name}</div>
+              <div style="font-size:10px;color:${C.muted};">${c.address || "—"}</div>
+              <div style="margin-top:4px;font-size:10px;">
+                <span style="font-weight:700;padding:1px 6px;border-radius:999px;background:${color}22;color:${color};">${c.property_category}</span>
+                <span style="color:${C.indigo};font-weight:700;margin-left:6px;">📍 ${c.distance_km} km</span>
+              </div>
+            </div>`,
+            { maxWidth: 240 },
+          );
+      });
+
+      // Top-7 recommended property markers (rendered after nearby, so they're on top)
       properties.forEach((p, i) => {
         if (p.projectLat === null || p.projectLng === null) return;
         const rank       = i + 1;
@@ -289,9 +334,9 @@ export default function LeafletMap({
         mapRef.current = null;
       }
     };
-    // Rebuild map when coords or property list changes
+    // Rebuild map when coords, nearby condos, or selection changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lat, lng, postalCode, properties.length, selectedProject]);
+  }, [lat, lng, postalCode, properties.length, nearbyCondos.length, selectedProject]);
 
   if (!hasCoords) {
     return (
