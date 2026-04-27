@@ -34,13 +34,14 @@ export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [authErr,  setAuthErr]  = useState("");
 
-  const [data,       setData]       = useState<PageData | null>(null);
-  const [page,       setPage]       = useState(1);
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
-  const [loading,    setLoading]    = useState(false);
+  const [data,        setData]        = useState<PageData | null>(null);
+  const [page,        setPage]        = useState(1);
+  const [typeFilter,  setTypeFilter]  = useState<TypeFilter>("All");
+  const [loading,     setLoading]     = useState(false);
   const [bulkPending, setBulkPending] = useState(false);
-  const [pending,    setPending]    = useState<Record<number, boolean>>({});
-  const [toast,      setToast]      = useState<{ msg: string; ok: boolean } | null>(null);
+  const [pending,     setPending]     = useState<Record<number, boolean>>({});
+  const [selected,    setSelected]    = useState<Set<number>>(new Set());
+  const [toast,       setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -49,6 +50,7 @@ export default function AdminPage() {
 
   const load = useCallback(async (p: number, tf: TypeFilter) => {
     setLoading(true);
+    setSelected(new Set());
     try {
       const res = await fetch(`/api/admin/candidates?page=${p}&type=${tf}`, {
         headers: { "x-admin-token": TOKEN },
@@ -76,6 +78,34 @@ export default function AdminPage() {
     }
   }
 
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const ids = data?.candidates.map((c) => c.id) ?? [];
+    setSelected((prev) =>
+      prev.size === ids.length ? new Set() : new Set(ids),
+    );
+  }
+
+  function removeIds(ids: number[], masterDelta: number) {
+    setData((prev) => prev
+      ? {
+          ...prev,
+          candidates:  prev.candidates.filter((c) => !ids.includes(c.id)),
+          total:       prev.total - ids.length,
+          masterCount: prev.masterCount + masterDelta,
+        }
+      : prev,
+    );
+    setSelected(new Set());
+  }
+
   async function handleAction(id: number, action: "accept" | "reject") {
     setPending((p) => ({ ...p, [id]: true }));
     try {
@@ -86,15 +116,7 @@ export default function AdminPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showToast(action === "accept" ? "Moved to master ✓" : "Rejected ✓", true);
-      setData((prev) => prev
-        ? {
-            ...prev,
-            candidates:  prev.candidates.filter((c) => c.id !== id),
-            total:       prev.total - 1,
-            masterCount: action === "accept" ? prev.masterCount + 1 : prev.masterCount,
-          }
-        : prev
-      );
+      removeIds([id], action === "accept" ? 1 : 0);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Action failed", false);
     } finally {
@@ -102,7 +124,32 @@ export default function AdminPage() {
     }
   }
 
-  async function handleBulkAccept() {
+  async function handleSelectionAction(action: "accept_many" | "reject_many") {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setBulkPending(true);
+    try {
+      const res = await fetch("/api/admin/candidates", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "x-admin-token": TOKEN },
+        body:    JSON.stringify({ action, ids }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { accepted?: number; rejected?: number };
+      const count = json.accepted ?? json.rejected ?? ids.length;
+      showToast(
+        action === "accept_many" ? `Accepted ${count} ✓` : `Rejected ${count} ✓`,
+        true,
+      );
+      removeIds(ids, action === "accept_many" ? ids.length : 0);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Action failed", false);
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
+  async function handleBulkAcceptHigh() {
     setBulkPending(true);
     try {
       const res = await fetch("/api/admin/candidates", {
@@ -112,11 +159,11 @@ export default function AdminPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { accepted } = await res.json() as { accepted: number };
-      showToast(`Bulk accepted ${accepted} candidates ✓`, true);
+      showToast(`Bulk accepted ${accepted} ✓`, true);
       await load(1, typeFilter);
       setPage(1);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Bulk accept failed", false);
+      showToast(e instanceof Error ? e.message : "Action failed", false);
     } finally {
       setBulkPending(false);
     }
@@ -172,21 +219,23 @@ export default function AdminPage() {
   }
 
   // ── Admin panel ───────────────────────────────────────────────────────────
-  const totalPages = data ? Math.ceil(data.total / data.limit) : 1;
-  const highScoreCount = data?.candidates.filter((c) => c.confidence_score >= 80).length ?? 0;
+  const totalPages  = data ? Math.ceil(data.total / data.limit) : 1;
+  const pageIds     = data?.candidates.map((c) => c.id) ?? [];
+  const allSelected = pageIds.length > 0 && selected.size === pageIds.length;
+  const someSelected = selected.size > 0 && !allSelected;
 
   return (
     <main className="min-h-screen bg-slate-50">
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-all
+        <div className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg
           ${toast.ok ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
           {toast.msg}
         </div>
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="w-7 h-7 bg-neutral-900 rounded-full flex items-center justify-center shrink-0">
             <span className="text-white text-[9px] font-black tracking-tighter">SG</span>
@@ -203,14 +252,14 @@ export default function AdminPage() {
             </>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <button
-            onClick={handleBulkAccept}
+            onClick={handleBulkAcceptHigh}
             disabled={bulkPending || !data?.total}
             className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-semibold transition-colors"
             title="Accept all candidates with confidence score ≥ 80"
           >
-            {bulkPending ? "Accepting…" : `Accept All (Score ≥ 80)${highScoreCount > 0 ? ` · ${highScoreCount}` : ""}`}
+            {bulkPending ? "Working…" : "Accept All (Score ≥ 80)"}
           </button>
           <button
             onClick={() => setAuthed(false)}
@@ -222,7 +271,7 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
-        {/* Type filter + legend */}
+        {/* Type filter */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="flex gap-1.5">
             {(["All", "Condo", "EC"] as TypeFilter[]).map((t) => (
@@ -244,6 +293,33 @@ export default function AdminPage() {
           </span>
         </div>
 
+        {/* Selection toolbar */}
+        {selected.size > 0 && (
+          <div className="mb-3 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5">
+            <span className="text-xs font-semibold text-indigo-700">{selected.size} selected</span>
+            <button
+              onClick={() => handleSelectionAction("accept_many")}
+              disabled={bulkPending}
+              className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors disabled:opacity-40"
+            >
+              Accept selected
+            </button>
+            <button
+              onClick={() => handleSelectionAction("reject_many")}
+              disabled={bulkPending}
+              className="px-3 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 text-xs font-semibold transition-colors disabled:opacity-40"
+            >
+              Reject selected
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="ml-auto text-xs text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
         {/* Table */}
         {loading ? (
           <div className="text-center py-20 text-slate-400 text-sm">Loading…</div>
@@ -251,9 +327,18 @@ export default function AdminPage() {
           <div className="text-center py-20 text-slate-400 text-sm">No candidates remaining.</div>
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
-            <table className="w-full text-sm min-w-[760px]">
+            <table className="w-full text-sm min-w-[800px]">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  <th className="pl-4 pr-2 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={toggleSelectAll}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </th>
                   <th className="px-4 py-3">Project</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Address / Coords</th>
@@ -264,10 +349,24 @@ export default function AdminPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data?.candidates.map((c) => {
-                  const hasCoords = c.lat !== 0 && c.lng !== 0;
-                  const mapsUrl   = `https://www.google.com/maps?q=${c.lat},${c.lng}`;
+                  const isSelected = selected.has(c.id);
+                  const hasCoords  = c.lat !== 0 && c.lng !== 0;
+                  const mapsUrl    = `https://www.google.com/maps?q=${c.lat},${c.lng}`;
                   return (
-                    <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={c.id}
+                      className={`transition-colors cursor-pointer
+                        ${isSelected ? "bg-indigo-50 hover:bg-indigo-100" : "hover:bg-slate-50"}`}
+                      onClick={() => toggleSelect(c.id)}
+                    >
+                      <td className="pl-4 pr-2 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(c.id)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </td>
                       <td className="px-4 py-3 font-medium text-slate-800 max-w-[180px]">
                         <div className="truncate" title={c.project_name}>{c.project_name}</div>
                         <div className="text-[10px] text-slate-400 mt-0.5">#{c.postal_code}</div>
@@ -285,6 +384,7 @@ export default function AdminPage() {
                             href={mapsUrl}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
                             className="text-[10px] text-indigo-500 hover:text-indigo-700 transition-colors mt-0.5 inline-block"
                           >
                             📍 {c.lat.toFixed(5)}, {c.lng.toFixed(5)}
@@ -306,7 +406,7 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-slate-400 text-xs max-w-[180px]">
                         <div className="truncate" title={c.reason}>{c.reason}</div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-2">
                           <button
                             onClick={() => handleAction(c.id, "accept")}

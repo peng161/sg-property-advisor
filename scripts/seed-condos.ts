@@ -333,7 +333,19 @@ async function main() {
     if (masterMap.has(key)) continue;
     if (!candidateMap.has(key)) candidateMap.set(key, r);
   }
-  const dedupedCandidates = [...candidateMap.values()];
+
+  // Exclude anything already promoted to master in a previous run
+  const existingMasterRes = await db.execute(
+    "SELECT project_name, postal_code FROM private_property_master",
+  );
+  const existingMasterKeys = new Set(
+    existingMasterRes.rows.map(
+      (r) => `${normalize(String(r.project_name))}|${String(r.postal_code)}`,
+    ),
+  );
+  const dedupedCandidates = [...candidateMap.values()].filter(
+    (r) => !existingMasterKeys.has(`${normalize(r.project_name)}|${r.postal_code}`),
+  );
 
   // ── Write masters ─────────────────────────────────────────────────────────
 

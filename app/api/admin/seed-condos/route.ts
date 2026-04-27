@@ -295,7 +295,41 @@ export async function POST() {
           if (masterMap.has(key)) continue;
           if (!candidateMap.has(key)) candidateMap.set(key, r);
         }
-        const dedupedCandidates = [...candidateMap.values()];
+
+        // Exclude anything already promoted to master in a previous run
+        const existingMasterRes = await db.execute(
+          "SELECT project_name, postal_code FROM private_property_master",
+        );
+        const existingMasterKeys = new Set(
+          existingMasterRes.rows.map(
+            (r) => `${normalize(String(r.project_name))}|${String(r.postal_code)}`,
+          ),
+        );
+        const dedupedCandidates = [...candidateMap.values()].filter(
+          (r) => !existingMasterKeys.has(`${normalize(r.project_name)}|${r.postal_code}`),
+        );
+
+        // Also clean up any stale candidates that were previously accepted
+        if (existingMasterKeys.size > 0) {
+          const staleCheck = await db.execute(
+            "SELECT id, project_name, postal_code FROM private_property_candidates",
+          );
+          const staleIds = staleCheck.rows
+            .filter((r) => existingMasterKeys.has(`${normalize(String(r.project_name))}|${String(r.postal_code)}`))
+            .map((r) => Number(r.id))
+            .filter(Boolean);
+          if (staleIds.length > 0) {
+            const CHUNK = 500;
+            for (let i = 0; i < staleIds.length; i += CHUNK) {
+              const batch = staleIds.slice(i, i + CHUNK);
+              await db.execute({
+                sql:  `DELETE FROM private_property_candidates WHERE id IN (${batch.map(() => "?").join(",")})`,
+                args: batch,
+              });
+            }
+            send({ type: "cleanup", removed: staleIds.length });
+          }
+        }
 
         send({ type: "inserting", masters: dedupedMasters.length, candidates: dedupedCandidates.length });
 

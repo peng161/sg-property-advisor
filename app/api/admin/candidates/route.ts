@@ -65,7 +65,7 @@ export async function POST(req: Request) {
   const db = getDb();
   if (!db) return Response.json({ error: "DB not available" }, { status: 503 });
 
-  const { action, id } = await req.json() as { action: string; id?: number };
+  const { action, id, ids } = await req.json() as { action: string; id?: number; ids?: number[] };
 
   if (action === "accept") {
     if (id == null) return Response.json({ error: "id required" }, { status: 400 });
@@ -86,6 +86,27 @@ export async function POST(req: Request) {
     if (id == null) return Response.json({ error: "id required" }, { status: 400 });
     await db.execute({ sql: "DELETE FROM private_property_candidates WHERE id = ?", args: [id] });
     return Response.json({ ok: true });
+  }
+
+  if (action === "accept_many") {
+    if (!ids?.length) return Response.json({ accepted: 0 });
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await db.execute({ sql: `SELECT * FROM private_property_candidates WHERE id IN (${placeholders})`, args: ids });
+    if (!rows.rows.length) return Response.json({ accepted: 0 });
+    const inserts = rows.rows.map((r) => ({
+      sql:  "INSERT OR REPLACE INTO private_property_master (project_name, property_type, address, postal_code, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [r.project_name, r.property_type, r.address, r.postal_code, r.lat, r.lng, r.confidence_score, r.source_keyword, new Date().toISOString()],
+    }));
+    const deletes = ids.map((rowId) => ({ sql: "DELETE FROM private_property_candidates WHERE id = ?", args: [rowId] }));
+    await db.batch([...inserts, ...deletes], "write");
+    return Response.json({ accepted: rows.rows.length });
+  }
+
+  if (action === "reject_many") {
+    if (!ids?.length) return Response.json({ rejected: 0 });
+    const placeholders = ids.map(() => "?").join(",");
+    await db.execute({ sql: `DELETE FROM private_property_candidates WHERE id IN (${placeholders})`, args: ids });
+    return Response.json({ rejected: ids.length });
   }
 
   if (action === "accept_high") {
