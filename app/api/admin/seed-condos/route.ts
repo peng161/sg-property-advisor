@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/sqlite";
+import { classify } from "@/lib/property-classifier";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -13,32 +14,6 @@ const SEARCH_KEYWORDS = [
   "grove", "loft", "casa", "court", "point", "place", "mansion",
 ] as const;
 
-const REJECT_PHRASES = [
-  "GARDENS BY THE BAY",
-  "MRT STATION", "MRT EXIT", "STATION EXIT",
-  "BUS STOP",
-  "AVENUE TOWARDS", "ROAD TOWARDS",
-  "EXPRESSWAY", "PARK CONNECTOR",
-  "NATURE RESERVE",
-  "SCHOOL", "HOSPITAL", "CLINIC",
-  "CHURCH", "TEMPLE", "MOSQUE",
-  "COMMUNITY CENTRE",
-  "INDUSTRIAL", "WAREHOUSE", "FACTORY",
-] as const;
-
-const HIGH_CONF_TERMS = [
-  "EXECUTIVE CONDOMINIUM", "CONDOMINIUM", "CONDO",
-  "APARTMENT", "RESIDENCES", "RESIDENCE", "SUITES",
-] as const;
-
-const BRANDING_WORDS = [
-  "PARC", "PARK", "VIEW", "HEIGHTS", "HILL", "CREST", "GREEN", "GARDENS",
-  "VALLEY", "BAY", "SHORE", "TOWERS", "GROVE", "LOFT", "CASA", "COURT",
-  "POINT", "PLACE", "MANSION", "TREES", "LAKE",
-] as const;
-
-const ROAD_SUFFIX_RE = /\b(AVENUE|ROAD|STREET|DRIVE|CRESCENT|WALK|WAY|LANE|CLOSE|LINK|FLYOVER|HIGHWAY|BOULEVARD|RING)\s*\d*$/;
-
 const MAX_PAGES = 80;
 const PAGE_DELAY = 120;
 const CHUNK = 500;
@@ -51,16 +26,6 @@ interface OneMapResult {
   LATITUDE:   string;
   LONGITUDE:  string;
   LONGTITUDE: string;
-}
-
-type Bucket = "master" | "candidate" | "reject";
-
-interface Classified {
-  bucket:       Bucket;
-  score:        number;
-  reason:       string;
-  projectName:  string;
-  propertyType: "Condo" | "EC";
 }
 
 interface SeedRecord {
@@ -85,67 +50,6 @@ interface MergedMasterRecord {
   lng:              number;
   confidence_score: number;
   source_keyword:   string;
-}
-
-function classify(
-  building: string, searchval: string, address: string,
-  postal: string, lat: number, lng: number,
-): Classified {
-  const rawBuilding = (building || searchval || "").trim();
-  const b     = rawBuilding.toUpperCase();
-  const a     = address.toUpperCase().trim();
-  const combo = `${b} ${a}`;
-
-  for (const phrase of REJECT_PHRASES) {
-    if (combo.includes(phrase)) {
-      return { bucket: "reject", score: 0, reason: `reject: "${phrase}"`, projectName: rawBuilding, propertyType: "Condo" };
-    }
-  }
-  if (/\bERP\b/.test(combo)) {
-    return { bucket: "reject", score: 0, reason: 'reject: "ERP"', projectName: rawBuilding, propertyType: "Condo" };
-  }
-
-  let score = 0;
-  const reasons: string[] = [];
-  let isEC = false;
-
-  for (const term of HIGH_CONF_TERMS) {
-    if (combo.includes(term)) {
-      score += 4;
-      reasons.push(`+4 "${term}"`);
-      if (term === "EXECUTIVE CONDOMINIUM") isEC = true;
-      break;
-    }
-  }
-
-  const cleanPostal = postal.replace(/\D/g, "");
-  if (rawBuilding.length > 0 && cleanPostal.length === 6 && lat && lng) {
-    const wordCount       = b.split(/\s+/).filter(Boolean).length;
-    const isBuildingBlock = /^(BLK|BLOCK)\s*\d/i.test(rawBuilding);
-    const startsWithDigit = /^\d/.test(rawBuilding);
-    const isRoadName      = ROAD_SUFFIX_RE.test(b);
-
-    if (!isBuildingBlock && !startsWithDigit && !isRoadName && wordCount >= 2 && wordCount <= 5) {
-      score += 2;
-      reasons.push("+2 named project");
-    }
-  }
-
-  for (const word of BRANDING_WORDS) {
-    if (new RegExp(`\\b${word}\\b`).test(b)) {
-      score += 1;
-      reasons.push(`+1 branding "${word}"`);
-      break;
-    }
-  }
-
-  const projectName   = rawBuilding || address.split(" ").slice(0, 4).join(" ");
-  const propertyType: "Condo" | "EC" = isEC ? "EC" : "Condo";
-  const reasonStr     = reasons.join(", ") || "no positive signals";
-
-  if (score < 2)  return { bucket: "reject",    score, reason: `score ${score}: ${reasonStr}`, projectName, propertyType };
-  if (score <= 3) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
-  return                  { bucket: "master",    score, reason: reasonStr,                       projectName, propertyType };
 }
 
 function normalize(name: string): string {
