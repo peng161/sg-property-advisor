@@ -22,7 +22,7 @@ function normalize(name: string): string {
 async function upsertToMaster(db: Client, rows: Array<Record<string, unknown>>) {
   if (!rows.length) return;
 
-  // Group by project_name
+  // Group by project_name (rows may already be one-per-project after schema change)
   const groups = new Map<string, Array<Record<string, unknown>>>();
   for (const r of rows) {
     const key = normalize(s(r.project_name));
@@ -43,37 +43,49 @@ async function upsertToMaster(db: Client, rows: Array<Record<string, unknown>>) 
 
   for (const [, group] of groups) {
     const projectName = s(group[0].project_name);
-    const newPostals  = group.map((r) => s(r.postal_code)).filter(Boolean);
-    const newLat      = group.reduce((sum, r) => sum + n(r.lat), 0) / group.length;
-    const newLng      = group.reduce((sum, r) => sum + n(r.lng), 0) / group.length;
     const best        = group.reduce(
       (b, r) => n(r.confidence_score) > n(b.confidence_score) ? r : b,
       group[0],
     );
 
+    // Each candidate row now has postal_codes (JSON) + block_count + centroid lat/lng
+    const candBlockCount = group.reduce((sum, r) => sum + n(r.block_count || 1), 0);
+    const newPostals = [...new Set(
+      group.flatMap((r) => {
+        try { return JSON.parse(s(r.postal_codes || "[]")) as string[]; }
+        catch { return []; }
+      }).filter(Boolean)
+    )];
+    // Weighted centroid from candidate group (already centroid per row)
+    const newLat = group.reduce((sum, r) => sum + n(r.lat) * n(r.block_count || 1), 0) / candBlockCount;
+    const newLng = group.reduce((sum, r) => sum + n(r.lng) * n(r.block_count || 1), 0) / candBlockCount;
+
     const ex = existingMap.get(projectName);
     if (ex) {
-      // Merge new blocks into existing master entry
       const exPostals: string[] = JSON.parse(s(ex.postal_codes) || "[]");
       const exCount   = n(ex.block_count) || 1;
-      const merged    = exCount + group.length;
+      const newOnly   = newPostals.filter((p) => !exPostals.includes(p));
+      const merged    = exCount + newOnly.length;
       const mergedPostals = [...new Set([...exPostals, ...newPostals])];
-      const mergedLat = (n(ex.lat) * exCount + newLat * group.length) / merged;
-      const mergedLng = (n(ex.lng) * exCount + newLng * group.length) / merged;
+      const mergedLat = newOnly.length > 0
+        ? (n(ex.lat) * exCount + newLat * newOnly.length) / merged
+        : n(ex.lat);
+      const mergedLng = newOnly.length > 0
+        ? (n(ex.lng) * exCount + newLng * newOnly.length) / merged
+        : n(ex.lng);
       statements.push({
         sql:  "UPDATE private_property_master SET postal_codes=?, block_count=?, lat=?, lng=? WHERE project_name=?",
-        args: [JSON.stringify(mergedPostals), merged, mergedLat, mergedLng, projectName],
+        args: [JSON.stringify(mergedPostals), Math.max(exCount, merged), mergedLat, mergedLng, projectName],
       });
     } else {
-      // New project — insert fresh master row
       statements.push({
         sql:  "INSERT INTO private_property_master (project_name, property_type, address, postal_codes, block_count, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         args: [
           projectName,
           s(best.property_type) || "Condo",
           s(best.address),
-          JSON.stringify([...new Set(newPostals)]),
-          group.length,
+          JSON.stringify(newPostals),
+          candBlockCount,
           newLat,
           newLng,
           n(best.confidence_score),
@@ -119,19 +131,24 @@ export async function GET(req: Request) {
   ]);
 
   return Response.json({
-    candidates: rows.rows.map((r) => ({
-      id:               n(r.id),
-      project_name:     s(r.project_name),
-      property_type:    s(r.property_type),
-      address:          s(r.address),
-      postal_code:      s(r.postal_code),
-      lat:              n(r.lat),
-      lng:              n(r.lng),
-      confidence_score: n(r.confidence_score),
-      reason:           s(r.reason),
-      source_keyword:   s(r.source_keyword),
-      seeded_at:        s(r.seeded_at),
-    })),
+    candidates: rows.rows.map((r) => {
+      let postalCodes: string[] = [];
+      try { postalCodes = JSON.parse(s(r.postal_codes || "[]")); } catch { /* empty */ }
+      return {
+        id:               n(r.id),
+        project_name:     s(r.project_name),
+        property_type:    s(r.property_type),
+        address:          s(r.address),
+        postal_codes:     postalCodes,
+        block_count:      n(r.block_count || 1),
+        lat:              n(r.lat),
+        lng:              n(r.lng),
+        confidence_score: n(r.confidence_score),
+        reason:           s(r.reason),
+        source_keyword:   s(r.source_keyword),
+        seeded_at:        s(r.seeded_at),
+      };
+    }),
     total:       n(countRes.rows[0]?.n ?? 0),
     masterCount: n(masterRes.rows[0]?.n ?? 0),
     page,

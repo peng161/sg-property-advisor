@@ -114,17 +114,17 @@ async function createTables() {
   await db.execute(`
     CREATE TABLE private_property_candidates (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_name     TEXT    NOT NULL,
+      project_name     TEXT    NOT NULL UNIQUE,
       property_type    TEXT    NOT NULL DEFAULT 'Condo',
       address          TEXT,
-      postal_code      TEXT,
+      postal_codes     TEXT    NOT NULL DEFAULT '[]',
+      block_count      INTEGER NOT NULL DEFAULT 1,
       lat              REAL    NOT NULL,
       lng              REAL    NOT NULL,
       confidence_score INTEGER NOT NULL,
       reason           TEXT,
       source_keyword   TEXT,
-      seeded_at        TEXT    NOT NULL,
-      UNIQUE(project_name, postal_code)
+      seeded_at        TEXT    NOT NULL
     )
   `);
   await db.execute("CREATE INDEX idx_ppc_loc ON private_property_candidates(lat, lng)");
@@ -310,22 +310,45 @@ async function main() {
   }
   process.stdout.write("\n");
 
-  // ── Filter candidates: exclude project_names already in master ────────────
+  // ── Merge candidates by project_name (same pattern as masters) ────────────
 
-  const filteredCandidates = dedupedCandidates.filter(
-    (r) => !masterProjectNames.has(normalize(r.project_name)),
-  );
+  const candidateGroupMap = new Map<string, SeedRecord[]>();
+  for (const r of dedupedCandidates) {
+    if (masterProjectNames.has(normalize(r.project_name))) continue;
+    const key = normalize(r.project_name);
+    if (!candidateGroupMap.has(key)) candidateGroupMap.set(key, []);
+    candidateGroupMap.get(key)!.push(r);
+  }
+
+  const mergedCandidates: MergedMasterRecord[] = [...candidateGroupMap.values()].map((records) => {
+    const best = records.reduce((b, r) => r.confidence_score > b.confidence_score ? r : b, records[0]);
+    const lat  = records.reduce((s, r) => s + r.lat, 0) / records.length;
+    const lng  = records.reduce((s, r) => s + r.lng, 0) / records.length;
+    const postalCodes = [...new Set(records.map((r) => r.postal_code).filter(Boolean))];
+    return {
+      project_name:     best.project_name,
+      property_type:    best.property_type,
+      address:          best.address,
+      postal_codes:     JSON.stringify(postalCodes),
+      block_count:      records.length,
+      lat, lng,
+      confidence_score: best.confidence_score,
+      source_keyword:   best.source_keyword,
+    };
+  });
 
   // ── Write candidates ──────────────────────────────────────────────────────
 
-  console.log(`Writing ${filteredCandidates.length} candidate records to Turso…`);
-  const candRows = filteredCandidates.map((r) => ({
+  console.log(`Writing ${mergedCandidates.length} merged candidate projects to Turso…`);
+  const candRows = mergedCandidates.map((r) => ({
     sql: `INSERT INTO private_property_candidates
-            (project_name, property_type, address, postal_code, lat, lng,
-             confidence_score, reason, source_keyword, seeded_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    args: [r.project_name, r.property_type, r.address, r.postal_code,
-           r.lat, r.lng, r.confidence_score, r.reason, r.source_keyword, seededAt],
+            (project_name, property_type, address, postal_codes, block_count,
+             lat, lng, confidence_score, reason, source_keyword, seeded_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [r.project_name, r.property_type, r.address, r.postal_codes, r.block_count,
+           r.lat, r.lng, r.confidence_score,
+           candidateGroupMap.get(normalize(r.project_name))![0].reason,
+           r.source_keyword, seededAt],
   }));
 
   written = 0;
@@ -350,19 +373,20 @@ async function main() {
   console.log("\n══ Seed Report ══════════════════════════════════════════════════");
   console.log(`  Total raw OneMap results  : ${grandTotalRaw.toLocaleString()}`);
   console.log(`  Master blocks found       : ${dedupedMasters.length.toLocaleString()} (${mergedMasters.length} unique projects)`);
-  console.log(`  Candidate blocks found    : ${filteredCandidates.length.toLocaleString()} this run`);
+  console.log(`  Candidate projects found  : ${mergedCandidates.length.toLocaleString()} (merged from ${dedupedCandidates.length} blocks)`);
   console.log(`  Rejected  (score <2)      : ${grandRejected.toLocaleString()}`);
   console.log(`  DB master total (projects): ${masterTotal.toLocaleString()}`);
   console.log(`  DB candidate total (blocks): ${candidateTotal.toLocaleString()}`);
   console.log(`  Turso DB                  : ${process.env.TURSO_DATABASE_URL}`);
 
-  if (filteredCandidates.length > 0) {
+  if (mergedCandidates.length > 0) {
     console.log("\n── Top 50 candidates (needs review) ─────────────────────────────");
-    const top50 = [...filteredCandidates]
+    const top50 = [...mergedCandidates]
       .sort((a, b) => b.confidence_score - a.confidence_score)
       .slice(0, 50);
     for (const c of top50) {
-      console.log(`  [${c.confidence_score}] ${c.project_name.padEnd(42)} ${c.postal_code}  ${c.reason}`);
+      const postals = JSON.parse(c.postal_codes) as string[];
+      console.log(`  [${c.confidence_score}] ${c.project_name.padEnd(42)} ${c.block_count} block(s)  ${postals.join(" ")}`);
     }
   }
 

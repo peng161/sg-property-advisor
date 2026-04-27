@@ -299,14 +299,21 @@ async function main() {
       const ex = exRes.rows[0];
       const exPostals: string[] = JSON.parse(String(ex.postal_codes || "[]"));
       const exCount   = Number(ex.block_count) || 1;
-      const newCount  = exCount + records.length;
-      const allCodes  = [...new Set([...exPostals, ...postalCodes])];
-      const mLat = (Number(ex.lat) * exCount + lat * records.length) / newCount;
-      const mLng = (Number(ex.lng) * exCount + lng * records.length) / newCount;
-      await db.execute({
-        sql:  "UPDATE private_property_master SET postal_codes=?, block_count=?, lat=?, lng=?, seeded_at=? WHERE project_name=?",
-        args: [JSON.stringify(allCodes), newCount, mLat, mLng, seededAt, best.project_name],
-      });
+      // Only count postal codes that are genuinely new (avoid double-counting on re-runs)
+      const newPostals = postalCodes.filter((p) => !exPostals.includes(p));
+      const allCodes   = [...new Set([...exPostals, ...postalCodes])];
+      if (newPostals.length > 0) {
+        const newCount   = exCount + newPostals.length;
+        const newRecs    = records.filter((r) => newPostals.includes(r.postal_code));
+        const newLat     = newRecs.reduce((s, r) => s + r.lat, 0) / newRecs.length;
+        const newLng     = newRecs.reduce((s, r) => s + r.lng, 0) / newRecs.length;
+        const mLat       = (Number(ex.lat) * exCount + newLat * newPostals.length) / newCount;
+        const mLng       = (Number(ex.lng) * exCount + newLng * newPostals.length) / newCount;
+        await db.execute({
+          sql:  "UPDATE private_property_master SET postal_codes=?, block_count=?, lat=?, lng=?, seeded_at=? WHERE project_name=?",
+          args: [JSON.stringify(allCodes), newCount, mLat, mLng, seededAt, best.project_name],
+        });
+      }
       updated++;
       existingNames.add(normName); // mark as now-in-master for candidate filter
     } else {
@@ -320,19 +327,62 @@ async function main() {
     }
   }
 
-  // Write candidates — skip any project_name already in master
+  // Write candidates — merge by project_name, skip any already in master
   const masterNames = new Set([...masterGroups.keys()]);
-  const newCandidates = candidates.filter(
+  const filteredCands = candidates.filter(
     (r) => !masterNames.has(normalize(r.project_name)) && !existingNames.has(normalize(r.project_name)),
   );
 
-  if (newCandidates.length > 0) {
-    const candRows = newCandidates.map((r) => ({
-      sql:  "INSERT OR IGNORE INTO private_property_candidates (project_name, property_type, address, postal_code, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      args: [r.project_name, r.property_type, r.address, r.postal_code, r.lat, r.lng, r.score, r.reason, area, seededAt],
-    }));
-    for (let i = 0; i < candRows.length; i += CHUNK) {
-      await db.batch(candRows.slice(i, i + CHUNK), "write");
+  // Group candidate blocks by project_name and compute centroid
+  const candGroupMap = new Map<string, DiscoveredRecord[]>();
+  for (const r of filteredCands) {
+    const key = normalize(r.project_name);
+    if (!candGroupMap.has(key)) candGroupMap.set(key, []);
+    candGroupMap.get(key)!.push(r);
+  }
+
+  if (candGroupMap.size > 0) {
+    // Fetch any existing candidate rows for these projects (from prior discover runs)
+    const candProjectNames = [...candGroupMap.values()].map((recs) => recs[0].project_name);
+    const ph = candProjectNames.map(() => "?").join(",");
+    const exCandRes = await db.execute({
+      sql:  `SELECT project_name, postal_codes, block_count, lat, lng FROM private_property_candidates WHERE project_name IN (${ph})`,
+      args: candProjectNames,
+    });
+    const exCandMap = new Map(exCandRes.rows.map((r) => [String(r.project_name), r]));
+
+    const candStatements: Array<{ sql: string; args: unknown[] }> = [];
+    for (const recs of candGroupMap.values()) {
+      const best       = recs.reduce((b, r) => r.score > b.score ? r : b, recs[0]);
+      const newLat     = recs.reduce((s, r) => s + r.lat, 0) / recs.length;
+      const newLng     = recs.reduce((s, r) => s + r.lng, 0) / recs.length;
+      const newPostals = [...new Set(recs.map((r) => r.postal_code).filter(Boolean))];
+
+      const ex = exCandMap.get(best.project_name);
+      if (ex) {
+        const exPostals: string[] = JSON.parse(String(ex.postal_codes || "[]"));
+        const trulyNew = newPostals.filter((p) => !exPostals.includes(p));
+        if (trulyNew.length === 0) continue;
+        const exCount  = Number(ex.block_count) || 1;
+        const newCount = exCount + trulyNew.length;
+        const newRecs  = recs.filter((r) => trulyNew.includes(r.postal_code));
+        const addLat   = newRecs.reduce((s, r) => s + r.lat, 0) / newRecs.length;
+        const addLng   = newRecs.reduce((s, r) => s + r.lng, 0) / newRecs.length;
+        const mLat     = (Number(ex.lat) * exCount + addLat * trulyNew.length) / newCount;
+        const mLng     = (Number(ex.lng) * exCount + addLng * trulyNew.length) / newCount;
+        candStatements.push({
+          sql:  "UPDATE private_property_candidates SET postal_codes=?, block_count=?, lat=?, lng=?, seeded_at=? WHERE project_name=?",
+          args: [JSON.stringify([...new Set([...exPostals, ...newPostals])]), newCount, mLat, mLng, seededAt, best.project_name],
+        });
+      } else {
+        candStatements.push({
+          sql:  "INSERT INTO private_property_candidates (project_name, property_type, address, postal_codes, block_count, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+          args: [best.project_name, best.property_type, best.address, JSON.stringify(newPostals), recs.length, newLat, newLng, best.score, best.reason, area, seededAt],
+        });
+      }
+    }
+    for (let i = 0; i < candStatements.length; i += CHUNK) {
+      await db.batch(candStatements.slice(i, i + CHUNK) as Parameters<typeof db.batch>[0], "write");
     }
   }
 
@@ -341,7 +391,7 @@ async function main() {
   console.log("── Results " + "─".repeat(44));
   console.log(`  New master projects added : ${newAdded}`);
   console.log(`  Existing projects updated : ${updated}`);
-  console.log(`  New candidates queued     : ${newCandidates.length}`);
+  console.log(`  Candidate projects queued : ${candGroupMap?.size ?? 0}`);
 
   if (newAdded > 0) {
     console.log("\n  New projects:");
@@ -355,13 +405,17 @@ async function main() {
     console.log(`\n  Updated ${updated} existing project${updated > 1 ? "s" : ""} with new block data.`);
   }
 
-  if (newCandidates.length > 0) {
+  if (candGroupMap && candGroupMap.size > 0) {
+    const candList = [...candGroupMap.values()].map((recs) => {
+      const best = recs.reduce((b, r) => r.score > b.score ? r : b, recs[0]);
+      return best;
+    });
     console.log("\n  Candidates (review at /admin):");
-    for (const c of newCandidates.slice(0, 15)) {
-      console.log(`    [score ${c.score}] ${c.project_name}  ${c.postal_code}  ~${c.dist_km}km`);
+    for (const c of candList.slice(0, 15)) {
+      console.log(`    [score ${c.score}] ${c.project_name}  ~${c.dist_km}km`);
     }
-    if (newCandidates.length > 15)
-      console.log(`    … and ${newCandidates.length - 15} more`);
+    if (candList.length > 15)
+      console.log(`    … and ${candList.length - 15} more`);
   }
 
   console.log("\n✓  Done.\n");

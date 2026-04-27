@@ -9,7 +9,8 @@ interface Candidate {
   project_name:     string;
   property_type:    string;
   address:          string;
-  postal_code:      string;
+  postal_codes:     string[];
+  block_count:      number;
   lat:              number;
   lng:              number;
   confidence_score: number;
@@ -369,7 +370,11 @@ export default function AdminPage() {
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800 max-w-[180px]">
                         <div className="truncate" title={c.project_name}>{c.project_name}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">#{c.postal_code}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {c.block_count > 1 ? `${c.block_count} blocks · ` : ""}
+                          {c.postal_codes.slice(0, 3).map(p => `#${p}`).join(" ")}
+                          {c.postal_codes.length > 3 ? ` +${c.postal_codes.length - 3}` : ""}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full
