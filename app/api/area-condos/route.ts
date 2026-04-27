@@ -31,6 +31,7 @@ export interface AreaCondoProperty {
   lat:               number;
   lng:               number;
   distance_km:       number;
+  confidence_score:  number; // 0–100 normalised (classifier 3–7 → 43–100; live search defaults to 43)
 }
 
 export interface AreaCondosResponse {
@@ -249,6 +250,7 @@ async function searchKeyword(
         lat,
         lng,
         distance_km:       dist,
+        confidence_score:  43, // live-search default (classifier min-master = 3 → 3/7*100 ≈ 43)
       });
     }
 
@@ -297,7 +299,7 @@ async function queryDb(
     const delta = radiusKm / 111.32;
     const res   = await db.execute({
       sql: `
-        SELECT project_name, property_type, address, postal_codes, lat, lng
+        SELECT project_name, property_type, address, postal_codes, lat, lng, confidence_score
         FROM private_property_master
         WHERE lat BETWEEN ? AND ?
           AND lng BETWEEN ? AND ?
@@ -316,6 +318,7 @@ async function queryDb(
         const codes = JSON.parse(String(r.postal_codes ?? "[]")) as string[];
         firstPostal = codes[0] ?? "";
       } catch { /* empty */ }
+      const rawScore = Number(r.confidence_score ?? 3);
       results.push({
         project_name:      String(r.project_name),
         property_category: String(r.property_type) as "Condo" | "EC",
@@ -323,7 +326,8 @@ async function queryDb(
         postal_code:       firstPostal,
         lat,
         lng,
-        distance_km: dist,
+        distance_km:      dist,
+        confidence_score: Math.round((rawScore / 7) * 100),
       });
     }
 

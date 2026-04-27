@@ -129,7 +129,6 @@ function legendHtml(): string {
     { color: "#f59e0b",  label: "Score 65–79" },
     { color: "#ef4444",  label: "Score <65" },
     { color: C.violet,   label: "Selected" },
-    { color: "#059669",  label: "Condo/EC" },
   ];
   return `
     <div style="
@@ -321,8 +320,8 @@ export default function LeafletMap({
       condos.forEach((c) => {
         if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
 
-        const isEC  = c.property_category === "EC";
-        const color = isEC ? "#059669" : C.emerald;
+        const score = c.confidence_score ?? 43;
+        const color = score >= 80 ? C.emerald : score >= 65 ? "#f59e0b" : "#ef4444";
         const icon  = L.divIcon({
           className:  "",
           iconSize:   [22, 22],
@@ -333,7 +332,7 @@ export default function LeafletMap({
             display:flex;align-items:center;justify-content:center;
             box-shadow:0 1px 4px rgba(0,0,0,.25);
             font-size:7px;font-weight:800;color:${C.white};
-          ">${isEC ? "EC" : "C"}</div>`,
+          ">${score}</div>`,
         });
 
         L.marker([c.lat, c.lng], { icon })
@@ -342,9 +341,9 @@ export default function LeafletMap({
             `<div style="font-family:system-ui,sans-serif;padding:8px 10px;background:${C.bg};border-radius:10px;">
               <div style="font-weight:700;font-size:12px;color:${C.text};margin-bottom:3px;">${c.project_name}</div>
               <div style="font-size:10px;color:${C.muted};">${c.address || "—"}</div>
-              <div style="margin-top:4px;font-size:10px;">
-                <span style="font-weight:700;padding:1px 6px;border-radius:999px;background:${color}22;color:${color};">${c.property_category}</span>
-                <span style="color:${C.indigo};font-weight:700;margin-left:6px;">📍 ${c.distance_km} km</span>
+              <div style="margin-top:4px;font-size:10px;display:flex;align-items:center;gap:6px;">
+                <span style="font-weight:800;padding:1px 6px;border-radius:999px;background:${color};color:${C.white};">${score}/100</span>
+                <span style="color:${C.indigo};font-weight:700;">📍 ${c.distance_km} km</span>
               </div>
             </div>`,
             { maxWidth: 240 },
