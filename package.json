@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "seed:hdb": "tsx scripts/seed.ts",
-    "seed:condos": "tsx scripts/seed-condos.ts"
+    "seed:condos": "tsx scripts/seed-condos.ts",
+    "discover": "tsx scripts/discover-condos.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
