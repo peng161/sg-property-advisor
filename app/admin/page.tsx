@@ -28,6 +28,17 @@ interface PageData {
 }
 
 type TypeFilter = "All" | "Condo" | "EC";
+type SortMode   = "score" | "alpha";
+
+function getPageNums(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  if (current > 3) out.push("…");
+  for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) out.push(p);
+  if (current < total - 2) out.push("…");
+  out.push(total);
+  return out;
+}
 
 export default function AdminPage() {
   const [authed,   setAuthed]   = useState(false);
@@ -38,6 +49,8 @@ export default function AdminPage() {
   const [data,        setData]        = useState<PageData | null>(null);
   const [page,        setPage]        = useState(1);
   const [typeFilter,  setTypeFilter]  = useState<TypeFilter>("All");
+  const [sortMode,    setSortMode]    = useState<SortMode>("score");
+  const [jumpInput,   setJumpInput]   = useState("");
   const [loading,     setLoading]     = useState(false);
   const [bulkPending, setBulkPending] = useState(false);
   const [pending,     setPending]     = useState<Record<number, boolean>>({});
@@ -49,11 +62,11 @@ export default function AdminPage() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const load = useCallback(async (p: number, tf: TypeFilter) => {
+  const load = useCallback(async (p: number, tf: TypeFilter, sm: SortMode) => {
     setLoading(true);
     setSelected(new Set());
     try {
-      const res = await fetch(`/api/admin/candidates?page=${p}&type=${tf}`, {
+      const res = await fetch(`/api/admin/candidates?page=${p}&type=${tf}&sort=${sm}`, {
         headers: { "x-admin-token": TOKEN },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -66,8 +79,8 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (authed) load(page, typeFilter);
-  }, [authed, page, typeFilter, load]);
+    if (authed) load(page, typeFilter, sortMode);
+  }, [authed, page, typeFilter, sortMode, load]);
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -161,7 +174,7 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { accepted } = await res.json() as { accepted: number };
       showToast(`Bulk accepted ${accepted} ✓`, true);
-      await load(1, typeFilter);
+      await load(1, typeFilter, sortMode);
       setPage(1);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Action failed", false);
@@ -272,7 +285,7 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
-        {/* Type filter */}
+        {/* Filters + sort */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="flex gap-1.5">
             {(["All", "Condo", "EC"] as TypeFilter[]).map((t) => (
@@ -285,6 +298,20 @@ export default function AdminPage() {
                     : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
               >
                 {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1.5 border-l border-slate-200 pl-3">
+            {([["score", "Score ↓"], ["alpha", "A–Z"]] as [SortMode, string][]).map(([sm, label]) => (
+              <button
+                key={sm}
+                onClick={() => { setSortMode(sm); setPage(1); }}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors
+                  ${sortMode === sm
+                    ? "bg-slate-700 text-white"
+                    : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+              >
+                {label}
               </button>
             ))}
           </div>
@@ -439,24 +466,75 @@ export default function AdminPage() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+            <button
+              onClick={() => setPage(1)}
+              disabled={page === 1}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600
+                         hover:bg-slate-50 disabled:opacity-40 transition-colors"
+            >
+              «
+            </button>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600
                          hover:bg-slate-50 disabled:opacity-40 transition-colors"
             >
-              ← Prev
+              ‹ Prev
             </button>
-            <span className="text-xs text-slate-500">Page {page} of {totalPages}</span>
+
+            {getPageNums(page, totalPages).map((n, i) =>
+              n === "…" ? (
+                <span key={`ellipsis-${i}`} className="px-1 text-xs text-slate-400 select-none">…</span>
+              ) : (
+                <button
+                  key={n}
+                  onClick={() => setPage(n)}
+                  className={`w-8 h-8 rounded-lg text-xs font-semibold transition-colors
+                    ${n === page
+                      ? "bg-indigo-600 text-white"
+                      : "border border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {n}
+                </button>
+              )
+            )}
+
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600
                          hover:bg-slate-50 disabled:opacity-40 transition-colors"
             >
-              Next →
+              Next ›
             </button>
+            <button
+              onClick={() => setPage(totalPages)}
+              disabled={page === totalPages}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600
+                         hover:bg-slate-50 disabled:opacity-40 transition-colors"
+            >
+              »
+            </button>
+
+            <span className="text-xs text-slate-400 ml-2">Go to</span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={jumpInput}
+              onChange={(e) => setJumpInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const p = Math.max(1, Math.min(totalPages, Number(jumpInput)));
+                  if (!isNaN(p)) { setPage(p); setJumpInput(""); }
+                }
+              }}
+              placeholder={String(page)}
+              className="w-14 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center
+                         focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
           </div>
         )}
       </div>

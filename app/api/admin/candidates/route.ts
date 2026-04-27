@@ -118,9 +118,12 @@ export async function GET(req: Request) {
   const typeWhere  = typeFilter === "All" ? "" : " AND property_type = ?";
   const typeArgs   = typeFilter === "All" ? [] : [typeFilter];
 
+  const sortParam  = url.searchParams.get("sort") ?? "score";
+  const orderBy    = sortParam === "alpha" ? "project_name ASC" : "confidence_score DESC, id ASC";
+
   const [rows, countRes, masterRes] = await Promise.all([
     db.execute({
-      sql:  `SELECT * FROM private_property_candidates${typeWhere} ORDER BY confidence_score DESC, id ASC LIMIT ? OFFSET ?`,
+      sql:  `SELECT * FROM private_property_candidates${typeWhere} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       args: [...typeArgs, limit, offset],
     }),
     db.execute({
