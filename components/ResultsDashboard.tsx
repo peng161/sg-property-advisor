@@ -814,7 +814,6 @@ export default function ResultsDashboard({
           return true;
         })
         .sort((a, b) => b.propertyScore - a.propertyScore)
-        .slice(0, 15)
     : [];
 
   const today = new Date().toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
