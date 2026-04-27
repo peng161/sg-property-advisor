@@ -798,18 +798,37 @@ export default function ResultsDashboard({
 
   const hasCoords = lat > 0 && lng > 0;
 
-  // Private Condo listings — filtered by tenure, capped at 15
+  // Distance band for proximity-first sorting (0 = closest)
+  function distBand(km: number | null): number {
+    if (km === null) return 5;
+    if (km < 0.5)  return 0;
+    if (km < 1.0)  return 1;
+    if (km < 1.5)  return 2;
+    if (km < 2.0)  return 3;
+    return 4;
+  }
+
+  // Private Condo listings — filtered then sorted:
+  //   distance filter active → proximity band first, score within band
+  //   "All"                  → pure score order (best regardless of distance)
   const displayedListings = propertyTab === "Condo"
-    ? privateListings.filter((p) => {
-        if (tenureFilter !== "All") {
-          if (tenureFilter === "Freehold" && !p.tenure.toLowerCase().includes("freehold")) return false;
-          if (tenureFilter === "999yr" && !p.tenure.includes("999")) return false;
-          if (tenureFilter === "99yr" && (p.tenure.toLowerCase().includes("freehold") || p.tenure.includes("999"))) return false;
-        }
-        if (minScoreFilter > 0 && p.propertyScore < minScoreFilter) return false;
-        if (distanceFilter !== "all" && (p.distanceKm === null || p.distanceKm > distanceFilter)) return false;
-        return true;
-      }).slice(0, 15)
+    ? privateListings
+        .filter((p) => {
+          if (tenureFilter !== "All") {
+            if (tenureFilter === "Freehold" && !p.tenure.toLowerCase().includes("freehold")) return false;
+            if (tenureFilter === "999yr" && !p.tenure.includes("999")) return false;
+            if (tenureFilter === "99yr" && (p.tenure.toLowerCase().includes("freehold") || p.tenure.includes("999"))) return false;
+          }
+          if (minScoreFilter > 0 && p.propertyScore < minScoreFilter) return false;
+          if (distanceFilter !== "all" && (p.distanceKm === null || p.distanceKm > distanceFilter)) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          if (distanceFilter === "all") return b.propertyScore - a.propertyScore;
+          const bd = distBand(a.distanceKm) - distBand(b.distanceKm);
+          return bd !== 0 ? bd : b.propertyScore - a.propertyScore;
+        })
+        .slice(0, 15)
     : [];
 
   const today = new Date().toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
