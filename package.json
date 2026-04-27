@@ -11,7 +11,7 @@
     "seed:condos": "tsx scripts/seed-condos.ts",
     "discover": "tsx scripts/discover-condos.ts",
     "research:tx": "tsx scripts/research-transactions.ts",
-    "seed:known": "tsx scripts/seed-known-condos.ts"
+    "scrape:condos": "tsx scripts/scrape-all-condos.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
