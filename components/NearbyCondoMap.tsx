@@ -207,9 +207,13 @@ export default function NearbyCondoMap({ lat, lng }: { lat: number; lng: number 
     return () => { cancelled = true; };
   }, [projects]);
 
+  const radiusKm = radius / 1000;
+
   const visibleProjects = useMemo(
-    () => segFilter === "All" ? projects : projects.filter((p) => p.market_segment === segFilter),
-    [projects, segFilter],
+    () => projects
+      .filter((p) => p.distance_km <= radiusKm)
+      .filter((p) => segFilter === "All" || p.market_segment === segFilter),
+    [projects, segFilter, radiusKm],
   );
 
   // ── 3. Build / rebuild Leaflet map ────────────────────────────────────────
@@ -259,13 +263,14 @@ export default function NearbyCondoMap({ lat, lng }: { lat: number; lng: number 
         maxZoom: 19,
       }).addTo(map);
 
-      // Radius dashed circle
-      L.circle([lat, lng], {
+      // Radius dashed circle — fit the map view to it with padding
+      const circle = L.circle([lat, lng], {
         radius,
         color: C.home, weight: 1.5, opacity: 0.4,
         fillColor: C.home, fillOpacity: 0.04,
         dashArray: "6 4",
       }).addTo(map);
+      map.fitBounds(circle.getBounds(), { padding: [24, 24] });
 
       // Home marker
       L.marker([lat, lng], {
@@ -314,7 +319,7 @@ export default function NearbyCondoMap({ lat, lng }: { lat: number; lng: number 
 
   if (!hasCoords) return null;
 
-  const radiusLabel = radius < 1000 ? `${radius}m` : `${radius / 1000}km`;
+  const radiusLabel = radiusKm < 1 ? `${radius}m` : `${radiusKm}km`;
   const enrichedCount = Object.keys(enrichedMap).length;
   const isEnriching   = !!enrichingProject;
 
