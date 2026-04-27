@@ -696,23 +696,24 @@ function CompactListRow({
 // ── MapWrapper ────────────────────────────────────────────────────────────────
 
 function MapWrapper({
-  lat, lng, postalCode, properties, selectedProject, onSelectProject, bare,
+  lat, lng, postalCode, properties, selectedProject, onSelectProject, bare, radiusM = 1500,
 }: {
   lat: number; lng: number; postalCode: string;
   properties: ExtendedProjectSummary[];
   selectedProject: string | null;
   onSelectProject: (project: string) => void;
   bare?: boolean;
+  radiusM?: number;
 }) {
   const [nearbyCondos, setNearbyCondos] = useState<AreaCondoProperty[]>([]);
 
   useEffect(() => {
     if (!postalCode) return;
-    fetch(`/api/area-condos?query=${encodeURIComponent(postalCode)}&radius=1500`)
+    fetch(`/api/area-condos?query=${encodeURIComponent(postalCode)}&radius=${radiusM}`)
       .then((r) => r.json())
       .then((data) => setNearbyCondos(Array.isArray(data.properties) ? data.properties : []))
       .catch(() => {});
-  }, [postalCode]);
+  }, [postalCode, radiusM]);
 
   const mapEl = (
     <LeafletMap
@@ -721,6 +722,7 @@ function MapWrapper({
       nearbyCondos={nearbyCondos}
       selectedProject={selectedProject}
       onSelectProject={onSelectProject}
+      radiusM={radiusM}
     />
   );
 
@@ -734,7 +736,7 @@ function MapWrapper({
         <div>
           <p className="font-semibold text-slate-800 text-sm">Property Map</p>
           <p className="text-[10px] text-slate-400">
-            Your neighbourhood · 1.5 km radius
+            Your neighbourhood · {(radiusM / 1000).toFixed(1)} km radius
             {nearbyCondos.length > 0 && (
               <span className="ml-2 text-indigo-500 font-semibold">
                 · {nearbyCondos.length} condos nearby
@@ -1304,6 +1306,7 @@ export default function ResultsDashboard({
                       properties={displayedListings}
                       selectedProject={selectedProject}
                       onSelectProject={setSelectedProject}
+                      radiusM={distanceFilter === "all" ? 2000 : distanceFilter * 1000}
                       bare
                     />
                   </div>

@@ -156,15 +156,18 @@ export interface LeafletMapProps {
   nearbyCondos?:    AreaCondoProperty[];
   selectedProject:  string | null;
   onSelectProject:  (project: string) => void;
+  radiusM?:         number;
 }
 
 export default function LeafletMap({
   lat, lng, postalCode, properties, nearbyCondos = [], selectedProject, onSelectProject,
+  radiusM = 1500,
 }: LeafletMapProps) {
   const containerRef    = useRef<HTMLDivElement>(null);
   const mapRef          = useRef<import("leaflet").Map | null>(null);
   const nearbyLayerRef  = useRef<import("leaflet").LayerGroup | null>(null);
   const propertyLayerRef= useRef<import("leaflet").LayerGroup | null>(null);
+  const circleRef       = useRef<import("leaflet").Circle | null>(null);
   const [mapReady, setMapReady] = useState(0);
 
   const hasCoords = lat > 0 && lng > 0;
@@ -239,9 +242,9 @@ export default function LeafletMap({
         maxZoom:     19,
       }).addTo(map);
 
-      // 1.5 km radius circle
-      L.circle([lat, lng], {
-        radius:      1500,
+      // Radius circle — updated live by Effect 4 when radiusM prop changes
+      circleRef.current = L.circle([lat, lng], {
+        radius:      radiusM,
         color:       C.indigo,
         weight:      1.5,
         opacity:     0.5,
@@ -287,6 +290,7 @@ export default function LeafletMap({
       destroyed = true;
       nearbyLayerRef.current   = null;
       propertyLayerRef.current = null;
+      circleRef.current        = null;
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -398,6 +402,13 @@ export default function LeafletMap({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject]);
+
+  // ── Effect 5: Update circle radius when distanceFilter changes ───────────
+  useEffect(() => {
+    if (circleRef.current) {
+      circleRef.current.setRadius(radiusM);
+    }
+  }, [radiusM]);
 
   if (!hasCoords) {
     return (
