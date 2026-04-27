@@ -766,8 +766,8 @@ export default function ResultsDashboard({
   const [brFilter, setBrFilter] = useState<BrId>(defaultBrFromChildren(numChildren));
   const [tenureFilter, setTenureFilter] = useState<"All" | "99yr" | "999yr" | "Freehold">("All");
 
-  // Upgrade path card state
-  const [selectedUpgrade, setSelectedUpgrade] = useState(assessment.recommendation);
+  // Property tab selector
+  const [propertyTab, setPropertyTab] = useState<"HDB" | "EC" | "Condo">("Condo");
 
   // Map selected property
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -796,8 +796,8 @@ export default function ResultsDashboard({
 
   const hasCoords = lat > 0 && lng > 0;
 
-  // Private Condo listings — filtered by tenure, capped at 7
-  const displayedListings = selectedUpgrade === "Private Condo"
+  // Private Condo listings — filtered by tenure, capped at 15
+  const displayedListings = propertyTab === "Condo"
     ? privateListings.filter((p) => {
         if (tenureFilter !== "All") {
           if (tenureFilter === "Freehold" && !p.tenure.toLowerCase().includes("freehold")) return false;
@@ -809,10 +809,6 @@ export default function ResultsDashboard({
         return true;
       }).slice(0, 15)
     : [];
-
-  const recIdx = assessment.options.findIndex((o) => o.type === assessment.recommendation);
-  const selIdx = assessment.options.findIndex((o) => o.type === selectedUpgrade);
-  const selOption = assessment.options[selIdx] ?? assessment.options[0];
 
   const today = new Date().toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
 
@@ -902,11 +898,19 @@ export default function ResultsDashboard({
         <div className="md:hidden bg-white border-b border-slate-200 shadow-lg z-10">
           <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
 
-            {/* Upgrade summary */}
-            <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-100">
-              <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wide mb-1">Selected Path</p>
-              <p className="text-sm font-black text-indigo-800">{selectedUpgrade}</p>
-              <p className="text-[10px] text-indigo-500 mt-0.5">Tap a path card to change</p>
+            {/* Property type selector */}
+            <div>
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Property Type</p>
+              <div className="flex gap-2">
+                {(["HDB", "EC", "Condo"] as const).map((tab) => (
+                  <button key={tab} onClick={() => { setPropertyTab(tab); setShowMobileMenu(false); }}
+                    className={`flex-1 text-sm py-2 rounded-xl border font-semibold transition-colors ${
+                      propertyTab === tab ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500"
+                    }`}>
+                    {tab}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Min Bedrooms */}
@@ -931,7 +935,7 @@ export default function ResultsDashboard({
             </div>
 
             {/* Tenure filter */}
-            {selectedUpgrade === "Private Condo" && (
+            {propertyTab === "Condo" && (
               <div>
                 <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Tenure</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -1026,8 +1030,8 @@ export default function ResultsDashboard({
               )}
             </div>
 
-            {/* Tenure filter — Private Condo only */}
-            {selectedUpgrade === "Private Condo" && (
+            {/* Tenure filter — Condo tab only */}
+            {propertyTab === "Condo" && (
               <div className="mb-3">
                 <p className="text-[10px] text-slate-500 mb-1.5">Tenure</p>
                 <div className="grid grid-cols-2 gap-1">
@@ -1175,238 +1179,206 @@ export default function ResultsDashboard({
         <main className="flex-1 overflow-x-hidden p-3 md:p-4 space-y-4 min-w-0">
 
 
-          {/* ── Section 1: Upgrade Path Assessment ── */}
+          {/* ── Section 1: Financial Overview ── */}
           <section className="bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center gap-3 mb-5">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
               <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">1</div>
-              <div>
-                <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Upgrade Path Assessment</h2>
-                <p className="text-xs text-slate-400">Which upgrade path is most suitable for you?</p>
+              <div className="flex-1">
+                <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Financial Overview</h2>
+                <p className="text-xs text-slate-400">Your upgrade capacity at a glance</p>
+              </div>
+              <div className="shrink-0 flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2">
+                <span className="text-[10px] text-indigo-500 font-semibold uppercase tracking-wide">Recommended</span>
+                <span className="font-black text-indigo-800 text-sm">{assessment.recommendation}</span>
               </div>
             </div>
-
-            <div className="flex flex-col lg:flex-row gap-4">
-              {/* 4 option cards — 2×2 on mobile, 4-col on desktop */}
-              <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
-                {assessment.options.map((opt, i) => (
-                  <UpgradePathCard
-                    key={opt.type}
-                    option={opt}
-                    score={optionScores[i] ?? 60}
-                    isRecommended={opt.type === assessment.recommendation}
-                    isSelected={opt.type === selectedUpgrade}
-                    onClick={() => { setSelectedUpgrade(opt.type); setShowMobileMenu(false); }}
-                  />
-                ))}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 col-span-2 md:col-span-1">
+                <p className="text-[9px] text-indigo-500 mb-0.5">Current Flat Value</p>
+                <p className="text-base font-black text-indigo-700">{fmtM(assessment.currentMarketValue)}</p>
+                <p className="text-[9px] text-indigo-400">
+                  {assessment.capitalGain >= 0 ? "+" : ""}{fmtM(assessment.capitalGain)} gain
+                </p>
               </div>
-
-              {/* Why panel — below on mobile, right column on desktop */}
-              <div className="lg:w-52 shrink-0">
-                <WhyPanel
-                  recommendation={selOption?.type ?? assessment.recommendation}
-                  numChildren={numChildren}
-                  affordable={selOption?.affordable ?? false}
-                  gainPct={gainPct}
-                  remainingLease={remainingLease}
-                />
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-[9px] text-slate-500 mb-0.5">Capital Gain</p>
+                <p className={`text-base font-black ${gainPct >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  {gainPct >= 0 ? "+" : ""}{gainPct.toFixed(1)}%
+                </p>
+                <p className="text-[9px] text-slate-400">Since {purchaseYear}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-[9px] text-slate-500 mb-0.5">Net Proceeds</p>
+                <p className="text-base font-black text-slate-800">{fmtM(assessment.netProceeds)}</p>
+                <p className="text-[9px] text-slate-400">After loan repayment</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-[9px] text-slate-500 mb-0.5">HDB Budget</p>
+                <p className="text-base font-black text-slate-800">{fmtM(assessment.hdbBudget)}</p>
+                <p className="text-[9px] text-slate-400">Resale / BTO</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-[9px] text-slate-500 mb-0.5">Private Budget</p>
+                <p className="text-base font-black text-slate-800">{fmtM(assessment.privateBudget)}</p>
+                <p className="text-[9px] text-slate-400">EC / Condo</p>
               </div>
             </div>
           </section>
 
-          {/* ── Section 2: Private Condo — map-first interactive layout ── */}
-          {selectedUpgrade === "Private Condo" && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          {/* ── Section 2: Property Ranking ── */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
 
-              {/* Header */}
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-                <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">2</div>
-                <div className="flex-1">
-                  <h2 className="font-black text-slate-900 text-base uppercase tracking-wide flex items-center gap-2">
-                    Top {displayedListings.length} Private Condo Recommendations
-                    {tenureFilter !== "All" && (
-                      <span className="text-xs font-normal text-indigo-500 normal-case bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                        {tenureFilter === "99yr" ? "99-yr" : tenureFilter === "999yr" ? "999-yr" : "Freehold"}
-                      </span>
-                    )}
-                  </h2>
-                  <p className="text-[10px] text-slate-400">
-                    <span className="text-emerald-600">✓</span> Scored by affordability, distance &amp; market data
-                  </p>
-                </div>
+            {/* Header with 3-way tab toggle */}
+            <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
+              <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">2</div>
+              <div className="flex-1">
+                <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">Property Ranking</h2>
+                <p className="text-[10px] text-slate-400">
+                  <span className="text-emerald-600">✓</span> Scored by affordability, distance &amp; market data
+                </p>
               </div>
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden shrink-0">
+                {(["HDB", "EC", "Condo"] as const).map((tab) => (
+                  <button key={tab} onClick={() => setPropertyTab(tab)}
+                    className={`text-sm font-semibold px-4 py-2 transition-colors ${
+                      propertyTab === tab
+                        ? "bg-indigo-600 text-white"
+                        : "text-slate-600 hover:bg-slate-50"
+                    }`}>
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              {/* Filter bar */}
-              <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex flex-wrap gap-x-4 gap-y-2 items-center">
-                {/* Tenure */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Tenure</span>
-                  {(["All", "99yr", "999yr", "Freehold"] as const).map((t) => {
-                    const label = t === "99yr" ? "99yr" : t === "999yr" ? "999yr" : t;
-                    return (
-                      <button key={t} onClick={() => setTenureFilter(t)}
-                        className={`text-[10px] px-2 py-1 rounded-md border font-medium transition-colors ${
-                          tenureFilter === t ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
-                        }`}>
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Min Score */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Score</span>
-                  {([0, 60, 70, 80] as const).map((s) => (
-                    <button key={s} onClick={() => setMinScoreFilter(s)}
-                      className={`text-[10px] px-2 py-1 rounded-md border font-medium transition-colors ${
-                        minScoreFilter === s ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
-                      }`}>
-                      {s === 0 ? "All" : `${s}+`}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Distance */}
-                {hasCoords && (
+            {/* ── Condo tab: filter bar + map + list ── */}
+            {propertyTab === "Condo" && (
+              <>
+                {/* Filter bar */}
+                <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex flex-wrap gap-x-4 gap-y-2 items-center">
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Within</span>
-                    {(["all", 1, 1.5, 2] as const).map((d) => (
-                      <button key={String(d)} onClick={() => setDistanceFilter(d)}
+                    <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Tenure</span>
+                    {(["All", "99yr", "999yr", "Freehold"] as const).map((t) => {
+                      const label = t === "99yr" ? "99yr" : t === "999yr" ? "999yr" : t;
+                      return (
+                        <button key={t} onClick={() => setTenureFilter(t)}
+                          className={`text-[10px] px-2 py-1 rounded-md border font-medium transition-colors ${
+                            tenureFilter === t ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
+                          }`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Score</span>
+                    {([0, 60, 70, 80] as const).map((s) => (
+                      <button key={s} onClick={() => setMinScoreFilter(s)}
                         className={`text-[10px] px-2 py-1 rounded-md border font-medium transition-colors ${
-                          distanceFilter === d ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
+                          minScoreFilter === s ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
                         }`}>
-                        {d === "all" ? "All" : `${d}km`}
+                        {s === 0 ? "All" : `${s}+`}
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Map + List */}
-              <div className="flex flex-col lg:flex-row">
-                {/* Map — 65% */}
-                <div className="lg:w-[65%] border-b lg:border-b-0 lg:border-r border-slate-100" style={{ height: 520 }}>
-                  <MapWrapper
-                    lat={lat} lng={lng} postalCode={postalCode}
-                    properties={displayedListings}
-                    selectedProject={selectedProject}
-                    onSelectProject={setSelectedProject}
-                    bare
-                  />
-                </div>
-
-                {/* Compact list — 35% */}
-                <div className="lg:w-[35%] overflow-y-auto" style={{ height: 520 }}>
-                  {displayedListings.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400">
-                      {tenureFilter !== "All" || minScoreFilter > 0 || distanceFilter !== "all" ? (
-                        <>
-                          <p className="text-sm font-semibold text-slate-500 mb-1">No properties match your filters</p>
-                          <button
-                            onClick={() => { setTenureFilter("All"); setMinScoreFilter(0); setDistanceFilter("all"); }}
-                            className="mt-2 text-xs text-indigo-500 hover:text-indigo-700 font-semibold underline">
-                            Clear all filters
-                          </button>
-                        </>
-                      ) : (
-                        <p className="text-sm font-semibold text-slate-500">No listings available</p>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {displayedListings.map((listing, i) => (
-                        <CompactListRow
-                          key={listing.project}
-                          rank={i + 1}
-                          listing={listing}
-                          numChildren={numChildren}
-                          defaultBr={brFilter}
-                          budget={assessment.privateBudget}
-                          isSelected={selectedProject === listing.project}
-                          onSelect={() => setSelectedProject(selectedProject === listing.project ? null : listing.project)}
-                        />
+                  {hasCoords && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide mr-0.5">Within</span>
+                      {(["all", 1, 1.5, 2] as const).map((d) => (
+                        <button key={String(d)} onClick={() => setDistanceFilter(d)}
+                          className={`text-[10px] px-2 py-1 rounded-md border font-medium transition-colors ${
+                            distanceFilter === d ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-500 bg-white hover:border-slate-400"
+                          }`}>
+                          {d === "all" ? "All" : `${d}km`}
+                        </button>
                       ))}
-                      <p className="text-[9px] text-slate-400 px-4 py-3 border-t border-slate-100">
-                        Prices are estimates based on latest available data.
-                      </p>
-                    </>
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* ── Section 2: Stay / Bigger HDB / EC — classic list + small map ── */}
-          {selectedUpgrade !== "Private Condo" && (
-            <div className="flex flex-col md:flex-row gap-4">
-
-              {/* Properties list */}
-              <div className="flex-1 min-w-0 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 bg-slate-900 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0">2</div>
-                  <div>
-                    {selectedUpgrade === "Stay" && (
+                {/* Map + List */}
+                <div className="flex flex-col lg:flex-row">
+                  <div className="lg:w-[65%] border-b lg:border-b-0 lg:border-r border-slate-100" style={{ height: 520 }}>
+                    <MapWrapper
+                      lat={lat} lng={lng} postalCode={postalCode}
+                      properties={displayedListings}
+                      selectedProject={selectedProject}
+                      onSelectProject={setSelectedProject}
+                      bare
+                    />
+                  </div>
+                  <div className="lg:w-[35%] overflow-y-auto" style={{ height: 520 }}>
+                    {displayedListings.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400">
+                        {tenureFilter !== "All" || minScoreFilter > 0 || distanceFilter !== "all" ? (
+                          <>
+                            <p className="text-sm font-semibold text-slate-500 mb-1">No properties match your filters</p>
+                            <button
+                              onClick={() => { setTenureFilter("All"); setMinScoreFilter(0); setDistanceFilter("all"); }}
+                              className="mt-2 text-xs text-indigo-500 hover:text-indigo-700 font-semibold underline">
+                              Clear all filters
+                            </button>
+                          </>
+                        ) : (
+                          <p className="text-sm font-semibold text-slate-500">No listings available</p>
+                        )}
+                      </div>
+                    ) : (
                       <>
-                        <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">
-                          Top {sameTypeHdbListings.length} {flatType} Listings Near You
-                        </h2>
-                        <p className="text-[10px] text-slate-400">
-                          <span className="text-emerald-600">✓</span> Recent resale transactions sorted by remaining lease
-                        </p>
-                      </>
-                    )}
-                    {selectedUpgrade === "Bigger HDB" && (
-                      <>
-                        <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">
-                          {nextFlatType ? `${nextFlatType} HDB Options` : "Bigger HDB Options"}
-                        </h2>
-                        <p className="text-[10px] text-slate-400">
-                          <span className="text-emerald-600">✓</span> Recent resale transactions in {town || "your area"}
-                        </p>
-                      </>
-                    )}
-                    {selectedUpgrade === "EC" && (
-                      <>
-                        <h2 className="font-black text-slate-900 text-base uppercase tracking-wide">
-                          Executive Condominium Options
-                        </h2>
-                        <p className="text-[10px] text-slate-400">
-                          <span className="text-emerald-600">✓</span> Subsidised private living · subject to eligibility
+                        {displayedListings.map((listing, i) => (
+                          <CompactListRow
+                            key={listing.project}
+                            rank={i + 1}
+                            listing={listing}
+                            numChildren={numChildren}
+                            defaultBr={brFilter}
+                            budget={assessment.privateBudget}
+                            isSelected={selectedProject === listing.project}
+                            onSelect={() => setSelectedProject(selectedProject === listing.project ? null : listing.project)}
+                          />
+                        ))}
+                        <p className="text-[9px] text-slate-400 px-4 py-3 border-t border-slate-100">
+                          Prices are estimates based on latest available data.
                         </p>
                       </>
                     )}
                   </div>
                 </div>
+              </>
+            )}
 
-                {selectedUpgrade === "Stay" && (
-                  <div className="bg-white rounded-xl border border-slate-200 p-5">
-                    <p className="font-semibold text-slate-700 mb-3">
-                      Recent {flatType} Resale in {town || "your area"}
-                    </p>
-                    {sameTypeHdbListings.length > 0 ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {sameTypeHdbListings.map((t, i) => (
-                          <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                            <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
-                            <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
-                            <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm · {t.remainingLease}yr lease</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-slate-500 text-sm">No recent {flatType} transactions found in {town || "your area"}.</p>
-                    )}
-                  </div>
-                )}
+            {/* ── HDB tab ── */}
+            {propertyTab === "HDB" && (
+              <div className="p-5 space-y-5">
+                {/* Same flat type */}
+                <div>
+                  <p className="font-semibold text-slate-700 text-sm mb-3">
+                    Recent {flatType} Resale in {town || "your area"}
+                  </p>
+                  {sameTypeHdbListings.length > 0 ? (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {sameTypeHdbListings.map((t, i) => (
+                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                          <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
+                          <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
+                          <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm · {t.remainingLease}yr lease</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No recent {flatType} transactions found in {town || "your area"}.</p>
+                  )}
+                </div>
 
-                {selectedUpgrade === "Bigger HDB" && (
-                  <div className="bg-white rounded-xl border border-slate-200 p-5">
-                    <p className="font-semibold text-slate-700 mb-3">
-                      {nextFlatType ? `${nextFlatType} HDB in ${town || "your area"}` : "No larger HDB type available"}
+                {/* Bigger HDB */}
+                {nextFlatType && (
+                  <div>
+                    <p className="font-semibold text-slate-700 text-sm mb-3">
+                      Upgrade to {nextFlatType} in {town || "your area"}
                     </p>
                     {biggerHdbListings.length > 0 ? (
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {biggerHdbListings.slice(0, 8).map((t, i) => (
                           <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                             <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
@@ -1422,54 +1394,43 @@ export default function ResultsDashboard({
                   </div>
                 )}
 
-                {selectedUpgrade === "EC" && (
-                  <div className="bg-white rounded-xl border border-slate-200 p-5">
-                    <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
-                      <span className="text-xl">🏗️</span>
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm">Executive Condominiums</p>
-                        <p className="text-[10px] text-slate-400">Subsidised by HDB · privatises after 10 years · must meet eligibility</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {ecListings.map((ec) => {
-                        const affordable = ec.price <= assessment.privateBudget;
-                        return (
-                          <div key={ec.name} className={`rounded-xl border p-4 ${affordable ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`}>
-                            <p className="font-bold text-slate-800 text-sm leading-tight mb-1">{ec.name}</p>
-                            <p className="text-xl font-black text-indigo-600">{fmtM(ec.price)}</p>
-                            <p className="text-xs text-slate-500 mt-1">{ec.bedrooms} · {ec.location}</p>
-                            {affordable ? (
-                              <span className="inline-block mt-2 text-[9px] bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-full">✓ Within Budget</span>
-                            ) : (
-                              <span className="inline-block mt-2 text-[9px] bg-slate-200 text-slate-500 font-semibold px-2 py-0.5 rounded-full">Above Budget</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[9px] text-amber-600 mt-4 pt-3 border-t border-slate-100">
-                      ⓘ EC eligibility: Singapore Citizen, household income ≤ $16,000, not owned private property in last 30 months.
-                    </p>
-                  </div>
-                )}
+                <p className="text-[9px] text-slate-400">Note: Prices are estimates based on latest available data. Actual figures may vary.</p>
+              </div>
+            )}
 
-                <p className="text-[9px] text-slate-400 px-1">
-                  Note: Prices and PSF are estimates based on latest available data. Actual figures may vary.
+            {/* ── EC tab ── */}
+            {propertyTab === "EC" && (
+              <div className="p-5">
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                  <span className="text-xl">🏗️</span>
+                  <div>
+                    <p className="font-bold text-slate-800 text-sm">Executive Condominiums</p>
+                    <p className="text-[10px] text-slate-400">Subsidised by HDB · privatises after 10 years · must meet eligibility</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {ecListings.map((ec) => {
+                    const affordable = ec.price <= assessment.privateBudget;
+                    return (
+                      <div key={ec.name} className={`rounded-xl border p-4 ${affordable ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`}>
+                        <p className="font-bold text-slate-800 text-sm leading-tight mb-1">{ec.name}</p>
+                        <p className="text-xl font-black text-indigo-600">{fmtM(ec.price)}</p>
+                        <p className="text-xs text-slate-500 mt-1">{ec.bedrooms} · {ec.location}</p>
+                        {affordable ? (
+                          <span className="inline-block mt-2 text-[9px] bg-emerald-500 text-white font-bold px-2 py-0.5 rounded-full">✓ Within Budget</span>
+                        ) : (
+                          <span className="inline-block mt-2 text-[9px] bg-slate-200 text-slate-500 font-semibold px-2 py-0.5 rounded-full">Above Budget</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[9px] text-amber-600 mt-4 pt-3 border-t border-slate-100">
+                  ⓘ EC eligibility: Singapore Citizen, household income ≤ $16,000, not owned private property in last 30 months.
                 </p>
               </div>
-
-              {/* Map panel */}
-              <div className="w-full md:w-80 shrink-0">
-                <MapWrapper
-                  lat={lat} lng={lng} postalCode={postalCode}
-                  properties={[]}
-                  selectedProject={null}
-                  onSelectProject={() => {}}
-                />
-              </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* ── Section 3: Upgrade Suitability Score ── */}
           <section>
