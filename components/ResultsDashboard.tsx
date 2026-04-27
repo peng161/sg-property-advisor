@@ -26,11 +26,12 @@ export interface ExtendedProjectSummary {
   latestDate:    string;
   minSqm:        number;
   maxSqm:        number;
-  propertyScore: number;
-  trend3Y:       number;
-  distanceKm:    number | null;
-  projectLat:    number | null;
-  projectLng:    number | null;
+  propertyScore:  number;
+  trend3Y:        number;
+  distanceKm:     number | null;
+  projectLat:     number | null;
+  projectLng:     number | null;
+  remainingLease: number | null;
 }
 
 export interface EcSummary {
@@ -385,6 +386,9 @@ function PropertyCard({
           </div>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">{tenureShort}</span>
+            {listing.remainingLease !== null && (
+              <span className="text-[10px] text-white/70">{listing.remainingLease} yrs left</span>
+            )}
             <span className="text-[10px] text-white/80">{listing.marketSegment}</span>
             {listing.distanceKm !== null && <span className="text-[10px] text-white/80">📍 {listing.distanceKm} km</span>}
             {affordable && <span className="text-[10px] bg-emerald-400/90 text-white font-bold px-2 py-0.5 rounded-full">✓ Within Budget</span>}
@@ -469,6 +473,9 @@ function PropertyCard({
           <div className="flex flex-wrap items-center gap-2 mb-0.5">
             <h3 className="font-bold text-slate-900 text-base leading-tight">{listing.project}</h3>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tenureCls}`}>{tenureShort}</span>
+            {listing.remainingLease !== null && (
+              <span className="text-[10px] text-slate-400">{listing.remainingLease} yrs left</span>
+            )}
           </div>
           <p className="text-xs text-slate-400 mb-2 flex items-center gap-1"><span>📍</span> {listing.street}</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-3">
@@ -602,6 +609,9 @@ function CompactListRow({
               <span className="text-[10px] text-slate-400">📍 {listing.distanceKm} km</span>
             )}
             <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{tenureShort}</span>
+            {listing.remainingLease !== null && (
+              <span className="text-[10px] text-slate-400">{listing.remainingLease} yrs</span>
+            )}
             {affordable && (
               <span className="text-[10px] bg-emerald-100 text-emerald-700 font-semibold px-1.5 py-0.5 rounded-full">✓ Budget</span>
             )}

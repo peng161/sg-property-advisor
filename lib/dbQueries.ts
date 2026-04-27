@@ -207,16 +207,12 @@ export async function getPrivateProjectsNearby(
 
       const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
 
-      const rawTenure   = row.tenure ? s(row.tenure) : "Unknown";
+      const tenure      = row.tenure ? s(row.tenure) : "Unknown";
       const leaseStart  = row.lease_commencement_year ? n(row.lease_commencement_year) : null;
-      const leaseYears  = rawTenure.includes("999") ? 999 : rawTenure.includes("99") ? 99 : null;
-      const remainLease = leaseYears && leaseStart
+      const leaseYears  = tenure.includes("999") ? 999 : tenure.includes("99") ? 99 : null;
+      const remainingLease = leaseYears && leaseStart
         ? Math.max(0, leaseStart + leaseYears - currentYear)
         : null;
-      // Build the tenure string the UI expects: "99-year leasehold" → "78-year leasehold" etc.
-      const tenure = remainLease !== null
-        ? `${remainLease}-year leasehold`
-        : rawTenure;
       return {
         project:       s(row.project_name),
         street:        s(row.address),
@@ -231,9 +227,10 @@ export async function getPrivateProjectsNearby(
         maxSqm:        0,
         propertyScore,
         trend3Y,
-        distanceKm:    distKm,
-        projectLat:    rowLat,
-        projectLng:    rowLng,
+        distanceKm:     distKm,
+        projectLat:     rowLat,
+        projectLng:     rowLng,
+        remainingLease,
       };
     });
 
