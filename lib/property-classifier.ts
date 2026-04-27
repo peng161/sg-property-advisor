@@ -67,6 +67,24 @@ const REJECT_PHRASES = [
   "MINIMART", "CONVENIENCE STORE",
   // Hotels & serviced apartments (not private residential)
   "HOTEL", "SERVICED APARTMENT", "SERVICED RESIDENCE",
+  // Retail / shopping malls
+  "SHOPPING MALL", "SHOPPING CENTRE", "SHOPPING CENTER",
+  "MALL", "PLAZA", "ARCADE",
+  "WET MARKET", "NIGHT MARKET",
+  "JUNCTION", "INTERCHANGE MALL",
+  // Recreation centres & clubs (public / commercial)
+  "RECREATION CENTRE", "RECREATION CENTER", "RECREATIONAL CENTRE",
+  "COUNTRY CLUB", "GOLF CLUB", "SPORTS CLUB",
+  "CLUBHOUSE",
+  // Community & social services
+  "SOCIAL SERVICE", "WELFARE HOME", "SENIOR ACTIVITY CENTRE",
+  "STUDENT CARE", "DAY CARE",
+  // Other commercial / institutional
+  "BUSINESS PARK", "SCIENCE PARK", "TECHNOLOGY PARK",
+  "OFFICE TOWER", "OFFICE BLOCK",
+  "CONFERENCE CENTRE", "CONVENTION CENTRE",
+  "CINEMA", "THEATRE", "AUDITORIUM",
+  "MUSEUM", "GALLERY",
 ] as const;
 
 // ── Positive signals ──────────────────────────────────────────────────────────
