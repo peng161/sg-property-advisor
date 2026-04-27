@@ -11,7 +11,6 @@ import FinancialProfilePanel from "./FinancialProfilePanel";
 import UpgradeScorePanel from "./UpgradeScorePanel";
 
 const LeafletMap       = dynamic(() => import("./LeafletMap"),       { ssr: false });
-const AreaCondoSearch  = dynamic(() => import("./AreaCondoSearch"),  { ssr: false });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1456,15 +1455,6 @@ export default function ResultsDashboard({
                   onSelectProject={() => {}}
                 />
               </div>
-            </div>
-          )}
-
-          {/* Nearby condos search — only for Private Condo path */}
-          {selectedUpgrade === "Private Condo" && !!postalCode && (
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <p className="font-semibold text-slate-800 text-sm mb-1">Nearby Condos &amp; ECs</p>
-              <p className="text-xs text-slate-400 mb-4">Live OneMap search — adjust radius or search a different area</p>
-              <AreaCondoSearch initialPostalCode={postalCode} />
             </div>
           )}
 
