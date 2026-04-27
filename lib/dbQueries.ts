@@ -272,6 +272,78 @@ export async function getPrivateDemandMetrics(
   }
 }
 
+// ── HDB town prices ───────────────────────────────────────────────────────────
+// Returns median resale price per display flat type for a town, from recent
+// DB transactions. Replaces the data.gov.sg fetchHdbPrices() call.
+
+export async function getHdbPricesByTown(
+  town: string,
+): Promise<Record<string, number>> {
+  let db;
+  try { db = getDb(); } catch { return {}; }
+  if (!db) return {};
+
+  const cutoff = `${new Date().getFullYear() - 3}-01`;
+  try {
+    const result = await db.execute({
+      sql: `SELECT flat_type, resale_price FROM hdb_tx
+            WHERE UPPER(town) = UPPER(?) AND month >= ?
+            ORDER BY month DESC LIMIT 2000`,
+      args: [town, cutoff],
+    });
+
+    const byType: Record<string, number[]> = {};
+    for (const row of result.rows) {
+      const ft    = s(row.flat_type);
+      const price = n(row.resale_price);
+      if (!ft || !price) continue;
+      if (!byType[ft]) byType[ft] = [];
+      byType[ft].push(price);
+    }
+
+    const API_TO_DISPLAY: Record<string, string> = {
+      "3 ROOM": "3-Room", "4 ROOM": "4-Room", "5 ROOM": "5-Room", "EXECUTIVE": "Executive",
+    };
+    const out: Record<string, number> = {};
+    for (const [apiType, prices] of Object.entries(byType)) {
+      const display = API_TO_DISPLAY[apiType] ?? apiType;
+      const sorted  = [...prices].sort((a, b) => a - b);
+      const mid     = Math.floor(sorted.length / 2);
+      out[display]  = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// ── HDB lease year from block ─────────────────────────────────────────────────
+// Returns lease commencement year for a specific block from the DB.
+// Replaces the data.gov.sg fetchHdbBlockLeaseYear() call.
+
+export async function getHdbLeaseYear(
+  block: string,
+  town: string,
+): Promise<number | null> {
+  let db;
+  try { db = getDb(); } catch { return null; }
+  if (!db) return null;
+
+  try {
+    const result = await db.execute({
+      sql: `SELECT lease_commence_year FROM hdb_tx
+            WHERE UPPER(town) = UPPER(?) AND UPPER(block) = UPPER(?)
+              AND lease_commence_year > 0
+            ORDER BY month DESC LIMIT 1`,
+      args: [town, block],
+    });
+    const year = n(result.rows[0]?.lease_commence_year);
+    return year > 0 ? year : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function dbStatus(): Promise<{ connected: boolean; hdbCount: number; privateCount: number }> {
   const db = getDb();
   if (!db) return { connected: false, hdbCount: 0, privateCount: 0 };

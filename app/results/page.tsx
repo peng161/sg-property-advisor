@@ -1,8 +1,5 @@
 import { assess } from "@/lib/calculator";
-import { fetchHdbPrices, fetchHdbTransactions, fetchHdbBlockLeaseYear } from "@/lib/fetchHdb";
-import { fetchPrivatePrices } from "@/lib/fetchPrivate";
-import { fetchPrivateTransactions } from "@/lib/fetchPrivateTransactions";
-import type { PrivateTransaction } from "@/lib/fetchPrivateTransactions";
+import type { HdbResaleRecord } from "@/lib/fetchHdb";
 import { EC_OPTIONS } from "@/lib/mockData";
 import { geocodePostal } from "@/lib/geocode";
 import ResultsDashboard from "@/components/ResultsDashboard";
@@ -11,7 +8,8 @@ import {
   getHdbNearby,
   getHdbByTown,
   getPrivateProjectsNearby,
-  haversineKm,
+  getHdbPricesByTown,
+  getHdbLeaseYear,
 } from "@/lib/dbQueries";
 import { isDbReady } from "@/lib/sqlite";
 import { getUserFinancialProfile } from "@/lib/financialProfile";
@@ -22,60 +20,6 @@ import { isMyinfoConfigured } from "@/lib/myinfo/config";
 const FLAT_TYPE_API: Record<string, string> = {
   "3-Room": "3 ROOM", "4-Room": "4 ROOM", "5-Room": "5 ROOM", "Executive": "EXECUTIVE",
 };
-
-function medianOf(arr: number[]): number {
-  if (!arr.length) return 0;
-  const s = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
-}
-
-function getLeaseBand(years: number) {
-  if (years >= 90) return "90+";
-  if (years >= 80) return "80–90";
-  if (years >= 70) return "70–80";
-  if (years >= 60) return "60–70";
-  return "<60";
-}
-
-// Singapore postal district → [lat, lng] centroid
-const DISTRICT_CENTROIDS: Record<string, [number, number]> = {
-  "01": [1.2810, 103.8508], "02": [1.2760, 103.8423], "03": [1.2894, 103.8083],
-  "04": [1.2700, 103.8210], "05": [1.3116, 103.7633], "06": [1.2930, 103.8530],
-  "07": [1.3010, 103.8610], "08": [1.3070, 103.8520], "09": [1.3010, 103.8350],
-  "10": [1.3190, 103.8130], "11": [1.3300, 103.8330], "12": [1.3300, 103.8490],
-  "13": [1.3370, 103.8700], "14": [1.3180, 103.8920], "15": [1.3060, 103.9050],
-  "16": [1.3270, 103.9400], "17": [1.3580, 103.9730], "18": [1.3500, 103.9400],
-  "19": [1.3700, 103.8930], "20": [1.3610, 103.8450], "21": [1.3410, 103.7700],
-  "22": [1.3330, 103.7200], "23": [1.3780, 103.7490], "24": [1.4080, 103.7190],
-  "25": [1.4340, 103.7760], "26": [1.4000, 103.8190], "27": [1.4320, 103.8320],
-  "28": [1.4040, 103.8700],
-};
-
-function distanceBonus(km: number | null): number {
-  if (km === null) return 0;
-  if (km < 2)  return 18;
-  if (km < 5)  return 12;
-  if (km < 10) return 6;
-  if (km < 15) return 2;
-  return 0;
-}
-
-// Layer 2 scoring — private projects (used when NOT using DB / no location)
-function computePropertyScore(
-  p: { marketSegment: string; minPrice: number; tenure: string; txCount: number },
-  budget: number,
-  distKm: number | null = null
-): number {
-  let score = 50;
-  score += p.marketSegment === "OCR" ? 10 : p.marketSegment === "RCR" ? 7 : 4;
-  if (p.minPrice <= budget) score += 10;
-  else if (p.minPrice <= budget * 1.2) score += 4;
-  score += Math.min(Math.floor(p.txCount / 3), 6);
-  if (p.tenure.toLowerCase().includes("freehold") || p.tenure.includes("999")) score += 4;
-  score += distanceBonus(distKm);
-  return Math.min(Math.round(score), 99);
-}
 
 // Layer 1 scoring — upgrade path assessment (financial affordability)
 function computeOptionScore(
@@ -164,51 +108,27 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const returnUrlParams = new URLSearchParams(params as Record<string, string>).toString();
   const resultsReturnUrl = `/results${returnUrlParams ? `?${returnUrlParams}` : ""}`;
 
-  const [hdb, privatePrices, hdbTx] = await Promise.all([
-    fetchHdbPrices(town),
-    fetchPrivatePrices(),
-    town ? fetchHdbTransactions(town) : Promise.resolve([]),
+  const apiFlatType = FLAT_TYPE_API[input.flatType];
+
+  // All property data comes from the seeded DB — no live API calls
+  const [hdbPrices, leaseYearFromDb] = await Promise.all([
+    town ? getHdbPricesByTown(town) : Promise.resolve({} as Record<string, number>),
+    geoBlock && town ? getHdbLeaseYear(geoBlock, town) : Promise.resolve(null),
   ]);
 
-  // Auto-detect lease year ONLY from block-specific API — never from town average
-  const matchingTx = geoBlock
-    ? hdbTx.find((t) => t.block.trim().toUpperCase() === geoBlock.trim().toUpperCase())
-    : undefined;
-  const leaseYearFromApi =
-    !matchingTx && geoBlock && town
-      ? await fetchHdbBlockLeaseYear(geoBlock, town, geoStreet || undefined)
-      : null;
-
-  // Priority: user input > block-matched transaction > API lookup > unknown
+  // Priority: user input > DB block lookup > unknown
   const leaseCommencementYear =
-    userLeaseCommencementYear > 0 ? userLeaseCommencementYear
-    : matchingTx?.leaseCommenceYear
-      ? matchingTx.leaseCommenceYear
-    : leaseYearFromApi ?? 0;
+    userLeaseCommencementYear > 0 ? userLeaseCommencementYear : leaseYearFromDb ?? 0;
 
   const leaseKnown = leaseCommencementYear > 0 && leaseCommencementYear < currentYear;
   const remainingLease = leaseKnown
     ? Math.max(0, 99 - (currentYear - leaseCommencementYear))
-    : 95; // default assumption when lease year cannot be determined
+    : 95;
 
-  // ── Nearby market value (only when lease is known) ────────────────────────
-
-  const apiFlatType = FLAT_TYPE_API[input.flatType];
-  const myLeaseBand = leaseKnown ? getLeaseBand(remainingLease) : null;
-  let nearbyMarketValue = 0;
-  if (hdbTx.length > 0 && apiFlatType && myLeaseBand) {
-    const comparable = hdbTx.filter(
-      (t) => t.flatType === apiFlatType && getLeaseBand(t.remainingLease) === myLeaseBand
-    );
-    if (comparable.length > 0)
-      nearbyMarketValue = medianOf(comparable.map((t) => t.resalePrice));
-  }
-
-  const hdbWithNearby = nearbyMarketValue > 0
-    ? { ...(hdb ?? {}), [input.flatType]: nearbyMarketValue }
-    : hdb;
-
-  const result = assess(input, { hdb: hdbWithNearby, private: privatePrices });
+  const result = assess(input, {
+    hdb:     Object.keys(hdbPrices).length > 0 ? hdbPrices : null,
+    private: null,
+  });
   const gainPct = input.purchasePrice > 0
     ? (result.capitalGain / input.purchasePrice) * 100
     : 0;
@@ -224,142 +144,44 @@ export default async function ResultsPage({ searchParams }: PageProps) {
   const hasUserCoords = lat > 0 && lng > 0;
 
   let privateListings: ExtendedProjectSummary[] = [];
-  let dbUsed = false;
   let dbProjectCount = 0;
 
   if (isDbReady()) {
-    const { projects, fromDb, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 30);
-    if (fromDb && projects.length > 0) {
-      privateListings = projects;
-      dbUsed = true;
-      dbProjectCount = count;
-    }
-  }
-
-  // Fallback: API-based approach (using district centroid distances)
-  if (!dbUsed) {
-    const privateTx = await fetchPrivateTransactions();
-
-    const TOWN_SEGMENT: Record<string, "OCR" | "RCR" | "CCR"> = {
-      "Ang Mo Kio": "OCR", "Bedok": "OCR", "Bishan": "RCR", "Bukit Batok": "OCR",
-      "Bukit Merah": "RCR", "Bukit Panjang": "OCR", "Bukit Timah": "RCR",
-      "Central Area": "CCR", "Choa Chu Kang": "OCR", "Clementi": "RCR",
-      "Geylang": "RCR", "Hougang": "OCR", "Jurong East": "OCR", "Jurong West": "OCR",
-      "Kallang/Whampoa": "RCR", "Marine Parade": "RCR", "Pasir Ris": "OCR",
-      "Punggol": "OCR", "Queenstown": "RCR", "Sembawang": "OCR", "Sengkang": "OCR",
-      "Serangoon": "RCR", "Tampines": "OCR", "Toa Payoh": "RCR",
-      "Woodlands": "OCR", "Yishun": "OCR",
-    };
-    const userSegment: "OCR" | "RCR" | "CCR" = TOWN_SEGMENT[town] ?? "OCR";
-
-    type ProjectBucket = {
-      txs: PrivateTransaction[];
-      min: number; max: number;
-      psms: number[]; sqms: number[];
-    };
-    const byProject = new Map<string, ProjectBucket>();
-    for (const t of privateTx) {
-      const b = byProject.get(t.project);
-      if (!b) {
-        byProject.set(t.project, { txs: [t], min: t.price, max: t.price, psms: [t.pricePerSqm], sqms: [t.sqm] });
-      } else {
-        b.txs.push(t);
-        b.min = Math.min(b.min, t.price);
-        b.max = Math.max(b.max, t.price);
-        b.psms.push(t.pricePerSqm);
-        b.sqms.push(t.sqm);
-      }
-    }
-
-    function projectTrend3Y(txs: PrivateTransaction[]): number {
-      const sorted = [...txs].sort((a, b) => a.contractDate.localeCompare(b.contractDate));
-      if (sorted.length < 2) return 0;
-      const first = sorted[0].pricePerSqm;
-      const last  = sorted[sorted.length - 1].pricePerSqm;
-      return first > 0 ? ((last - first) / first * 100) : 0;
-    }
-
-    privateListings = Array.from(byProject.entries())
-      .map(([project, b]) => {
-        const med = medianOf(b.psms);
-        const district = (b.txs[0].district ?? "").padStart(2, "0");
-        const centroid = DISTRICT_CENTROIDS[district];
-        const distKm = hasUserCoords && centroid
-          ? Math.round(haversineKm(lat, lng, centroid[0], centroid[1]) * 10) / 10
-          : null;
-        const score = computePropertyScore({
-          marketSegment: b.txs[0].marketSegment,
-          minPrice:      b.min,
-          tenure:        b.txs[0].tenure,
-          txCount:       b.txs.length,
-        }, result.privateBudget, distKm);
-        return {
-          project,
-          street:        b.txs[0].street,
-          tenure:        b.txs[0].tenure,
-          marketSegment: b.txs[0].marketSegment,
-          minPrice:      b.min,
-          maxPrice:      b.max,
-          medianPsm:     med,
-          txCount:       b.txs.length,
-          latestDate:    [...b.txs].sort((a, c) => c.contractDate.localeCompare(a.contractDate))[0].contractDate,
-          minSqm:        Math.min(...b.sqms),
-          maxSqm:        Math.max(...b.sqms),
-          propertyScore: score,
-          trend3Y:       projectTrend3Y(b.txs),
-          distanceKm:    distKm,
-          projectLat:    centroid ? centroid[0] : null,
-          projectLng:    centroid ? centroid[1] : null,
-        };
-      })
-      .sort((a, b) => b.propertyScore - a.propertyScore || (a.distanceKm ?? 99) - (b.distanceKm ?? 99))
-      .slice(0, 30);
+    const { projects, count } = await getPrivateProjectsNearby(lat, lng, result.privateBudget, 30);
+    privateListings = projects;
+    dbProjectCount  = count;
   }
 
   // ── HDB: same flat type nearby (for "Stay" path) ──────────────────────────
-  // Priority: proximity search from DB → town search from DB → API fallback
-
-  let sameTypeHdbListings = hdbTx
-    .filter((t) => t.flatType === apiFlatType)
-    .sort((a, b) => b.remainingLease - a.remainingLease || a.resalePrice - b.resalePrice)
-    .slice(0, 7);
-
-  let hdbFromDb = false;
-  if (apiFlatType && isDbReady()) {
-    if (hasUserCoords) {
-      const { records, fromDb } = await getHdbNearby(lat, lng, apiFlatType, result.hdbBudget);
-      if (fromDb && records.length > 0) {
-        sameTypeHdbListings = records;
-        hdbFromDb = true;
-      }
-    }
-    // No precise coords — fall back to town-level DB query
-    if (!hdbFromDb && town) {
-      const { records, fromDb } = await getHdbByTown(town, apiFlatType, 7);
-      if (fromDb && records.length > 0) {
-        sameTypeHdbListings = records;
-        hdbFromDb = true;
-      }
-    }
-  }
-
-  // ── HDB upgrade listings ──────────────────────────────────────────────────
-  // Priority: town search from DB → API fallback
 
   const FLAT_ORDER = ["3-Room", "4-Room", "5-Room", "Executive"] as const;
   const nextFlatType: string | null =
     FLAT_ORDER[FLAT_ORDER.indexOf(input.flatType as typeof FLAT_ORDER[number]) + 1] ?? null;
   const nextApiFlatType = nextFlatType ? FLAT_TYPE_API[nextFlatType] : null;
 
-  let biggerHdbListings = nextApiFlatType
-    ? hdbTx.filter((t) => t.flatType === nextApiFlatType).slice(0, 12)
-    : [];
+  let sameTypeHdbListings: HdbResaleRecord[] = [];
+  let biggerHdbListings:   HdbResaleRecord[] = [];
+  let hdbFromDb = false;
 
-  if (nextApiFlatType && town && isDbReady()) {
-    const { records, fromDb } = await getHdbByTown(town, nextApiFlatType, 12);
-    if (fromDb && records.length > 0) {
-      biggerHdbListings = records;
+  if (isDbReady()) {
+    const dbQueries: Promise<void>[] = [];
+
+    if (apiFlatType) {
+      const nearbyOrTown = hasUserCoords
+        ? getHdbNearby(lat, lng, apiFlatType, result.hdbBudget)
+        : getHdbByTown(town, apiFlatType, 7);
+      dbQueries.push(nearbyOrTown.then(({ records, fromDb }) => {
+        if (fromDb && records.length > 0) { sameTypeHdbListings = records; hdbFromDb = true; }
+      }));
     }
+
+    if (nextApiFlatType && town) {
+      dbQueries.push(getHdbByTown(town, nextApiFlatType, 12).then(({ records, fromDb }) => {
+        if (fromDb && records.length > 0) biggerHdbListings = records;
+      }));
+    }
+
+    await Promise.all(dbQueries);
   }
 
   // ── Misc ──────────────────────────────────────────────────────────────────
@@ -379,10 +201,10 @@ export default async function ResultsPage({ searchParams }: PageProps) {
     leaseCommencementYear,
     leaseKnown,
     remainingLease,
-    hdbTxCount: hdbTx.length,
+    hdbTxCount: sameTypeHdbListings.length,
     privateProjectCount: privateListings.length,
-    privateSource: dbUsed ? "SQLite (1.5 km radius)" : "API (district centroid)",
-    hdbSource: hdbFromDb ? "SQLite (1.5 km radius)" : "API (town filter)",
+    privateSource: privateListings.length > 0 ? "DB (1.5 km radius)" : "none",
+    hdbSource: hdbFromDb ? "DB (nearby/town)" : "none",
   };
 
   return (
