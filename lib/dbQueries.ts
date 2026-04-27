@@ -171,11 +171,13 @@ export async function getPrivateProjectsNearby(
   const lngMax      = lng + lngDelta;
 
   try {
+    const currentYear = new Date().getFullYear();
     // LEFT JOIN with tx cache so enriched condos get real market scores
     const result = await db.execute({
       sql: `
         SELECT
           m.project_name, m.property_type, m.address, m.lat, m.lng,
+          m.tenure, m.lease_commencement_year,
           c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf
         FROM private_property_master m
         LEFT JOIN private_project_tx_cache c
@@ -205,10 +207,20 @@ export async function getPrivateProjectsNearby(
 
       const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
 
+      const rawTenure   = row.tenure ? s(row.tenure) : "Unknown";
+      const leaseStart  = row.lease_commencement_year ? n(row.lease_commencement_year) : null;
+      const leaseYears  = rawTenure.includes("999") ? 999 : rawTenure.includes("99") ? 99 : null;
+      const remainLease = leaseYears && leaseStart
+        ? Math.max(0, leaseStart + leaseYears - currentYear)
+        : null;
+      // Build the tenure string the UI expects: "99-year leasehold" → "78-year leasehold" etc.
+      const tenure = remainLease !== null
+        ? `${remainLease}-year leasehold`
+        : rawTenure;
       return {
         project:       s(row.project_name),
         street:        s(row.address),
-        tenure:        "Unknown",
+        tenure,
         marketSegment: "OCR" as const,
         minPrice:      est2BR,
         maxPrice:      medianPsm > 0 ? medianPsm * 100 : 0,

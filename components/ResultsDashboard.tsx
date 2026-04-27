@@ -351,6 +351,7 @@ function PropertyCard({
   const tenureShort = listing.tenure.includes("Freehold") ? "Freehold"
     : listing.tenure.includes("999") ? "999-yr"
     : listing.tenure.match(/(\d{2,3})-year/) ? listing.tenure.match(/(\d{2,3})-year/)![1] + "-yr"
+    : listing.tenure === "Unknown" || !listing.tenure ? "—"
     : "99-yr";
 
   const tenureCls = listing.tenure.includes("Freehold")
@@ -575,7 +576,9 @@ function CompactListRow({
   const score       = listing.propertyScore;
   const scoreCls    = score >= 80 ? "bg-emerald-500" : score >= 65 ? "bg-amber-500" : "bg-red-500";
   const tenureShort = listing.tenure.includes("Freehold") ? "FH"
-    : listing.tenure.includes("999") ? "999yr" : "99yr";
+    : listing.tenure.includes("999") ? "999yr"
+    : listing.tenure === "Unknown" || !listing.tenure ? "—"
+    : "99yr";
   const trendCls    = listing.trend3Y >= 0 ? "text-emerald-600" : "text-red-500";
 
   return (
