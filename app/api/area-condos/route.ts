@@ -297,7 +297,7 @@ async function queryDb(
     const delta = radiusKm / 111.32;
     const res   = await db.execute({
       sql: `
-        SELECT project_name, property_type, address, postal_code, lat, lng
+        SELECT project_name, property_type, address, postal_codes, lat, lng
         FROM private_property_master
         WHERE lat BETWEEN ? AND ?
           AND lng BETWEEN ? AND ?
@@ -311,11 +311,16 @@ async function queryDb(
       const lng  = Number(r.lng);
       const dist = Math.round(haversineKm(centLat, centLng, lat, lng) * 100) / 100;
       if (dist > radiusKm) continue;
+      let firstPostal = "";
+      try {
+        const codes = JSON.parse(String(r.postal_codes ?? "[]")) as string[];
+        firstPostal = codes[0] ?? "";
+      } catch { /* empty */ }
       results.push({
         project_name:      String(r.project_name),
         property_category: String(r.property_type) as "Condo" | "EC",
         address:           String(r.address  ?? ""),
-        postal_code:       String(r.postal_code ?? ""),
+        postal_code:       firstPostal,
         lat,
         lng,
         distance_km: dist,
@@ -387,15 +392,20 @@ export async function GET(req: NextRequest) {
     console.log(`[area-condos] keyword="${keyword}" subtotal: ${found.length} kept`);
   }
 
-  // Deduplicate by (project_name, postal_code)
-  const seen = new Set<string>();
-  const deduped: AreaCondoProperty[] = [];
+  // Deduplicate by project_name — group blocks and use centroid location
+  const projectGroups = new Map<string, AreaCondoProperty[]>();
   for (const p of allRaw) {
-    const key = `${p.project_name.toUpperCase()}|${p.postal_code}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(p);
+    const key = p.project_name.toUpperCase();
+    if (!projectGroups.has(key)) projectGroups.set(key, []);
+    projectGroups.get(key)!.push(p);
   }
+  const deduped: AreaCondoProperty[] = [...projectGroups.values()].map((group) => {
+    const best = group.reduce((b, r) => r.distance_km < b.distance_km ? r : b, group[0]);
+    const lat  = group.reduce((s, r) => s + r.lat, 0) / group.length;
+    const lng  = group.reduce((s, r) => s + r.lng, 0) / group.length;
+    const dist = Math.round(haversineKm(centre.lat, centre.lng, lat, lng) * 100) / 100;
+    return { ...best, lat, lng, distance_km: dist };
+  });
   deduped.sort((a, b) => a.distance_km - b.distance_km);
 
   console.log(
