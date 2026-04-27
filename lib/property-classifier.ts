@@ -82,6 +82,10 @@ const BRANDING_WORDS = [
   "VALLEY", "BAY", "SHORE", "TOWERS", "GROVE", "LOFT", "CASA", "COURT",
   "POINT", "PLACE", "MANSION", "TREES", "LAKE", "CANOPY", "BOTANNIA",
   "NORMANTON", "LAKEVILLE",
+  // Additional SG condo branding words
+  "WOODS", "HORIZON", "LODGE", "RIDGE", "COVE", "WATERFRONT",
+  "EDEN", "BLOSSOMS", "GRAND", "STELLAR", "BIJOU", "MARBELLA",
+  "TRILINQ", "TRIZON", "SERENADE", "INFINITI",
 ] as const;
 
 const ROAD_SUFFIX_RE =

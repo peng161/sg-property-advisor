@@ -36,9 +36,13 @@ const db = createClient({
 const SEARCH_KEYWORDS = [
   "executive condominium", "condominium", "residences", "residence",
   "apartments", "suites", "estate",
-  "the", "park", "parc", "view", "trees", "tree", "heights", "hill",
+  "the", "park", "parc", "view", "vew", "trees", "tree", "heights", "hill",
   "crest", "green", "gardens", "valley", "bay", "shore", "towers",
   "grove", "loft", "casa", "court", "point", "place", "mansion",
+  "lake", "canopy", "botannia", "normanton",
+  // Additional branding words
+  "woods", "horizon", "lodge", "ridge", "cove", "waterfront",
+  "eden", "blossoms", "grand", "stellar",
 ] as const;
 
 const CHUNK = 500;

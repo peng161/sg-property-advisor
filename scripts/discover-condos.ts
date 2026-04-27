@@ -23,10 +23,18 @@ import type { Bucket } from "../lib/property-classifier";
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
-const area = process.argv.slice(2).join(" ").trim();
+const cliArgs = process.argv.slice(2);
+const lastArg = cliArgs[cliArgs.length - 1] ?? "";
+const hasRadiusArg = cliArgs.length > 1 && /^\d+$/.test(lastArg);
+const RADIUS_M  = hasRadiusArg ? parseInt(lastArg) : 2000;
+const RADIUS_KM = RADIUS_M / 1000;
+const area = (hasRadiusArg ? cliArgs.slice(0, -1) : cliArgs).join(" ").trim();
+
 if (!area) {
   console.error('\nError: Please provide an area name.');
-  console.error('Example: npm run discover -- Clementi\n');
+  console.error('Usage: npm run discover -- <area> [radius_metres]');
+  console.error('Example: npm run discover -- Clementi');
+  console.error('Example: npm run discover -- "West Coast" 3000\n');
   process.exit(1);
 }
 
@@ -40,7 +48,6 @@ const db = createClient({
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ONEMAP_SEARCH = "https://www.onemap.gov.sg/api/common/elastic/search";
-const RADIUS_KM     = 2;
 const CHUNK         = 500;
 const PAGE_DELAY_MS = 110;
 
@@ -174,7 +181,13 @@ function buildKeywords(area: string): string[] {
     `${a} vale`,
     `${a} court`,
     `${a} place`,
-    // Broad residential terms — all filtered to RADIUS_KM (catch condos without area in name)
+    `${a} woods`,
+    `${a} ridge`,
+    `${a} cove`,
+    `${a} horizon`,
+    `${a} lodge`,
+    `${a} waterfront`,
+    // Broad residential terms — filtered to RADIUS_KM (catch condos without area in name)
     "executive condominium",
     "condominium",
     "residences",
@@ -208,6 +221,19 @@ function buildKeywords(area: string): string[] {
     "lake",
     "canopy",
     "estate",
+    // Additional branding words
+    "woods",
+    "horizon",
+    "lodge",
+    "ridge",
+    "cove",
+    "waterfront",
+    "eden",
+    "blossoms",
+    "grand",
+    "stellar",
+    "botannia",
+    "normanton",
   ];
 }
 
