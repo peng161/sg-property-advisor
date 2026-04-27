@@ -67,9 +67,11 @@ const HIGH_CONF_TERMS = [
 ] as const;
 
 const BRANDING_WORDS = [
-  "PARC", "PARK", "VIEW", "HEIGHTS", "HILL", "CREST", "GREEN", "GARDENS",
+  "PARC", "PARK", "VIEW", "VEW",   // VEW is a common SG condo spelling variant of VIEW
+  "HEIGHTS", "HILL", "CREST", "GREEN", "GARDENS",
   "VALLEY", "BAY", "SHORE", "TOWERS", "GROVE", "LOFT", "CASA", "COURT",
-  "POINT", "PLACE", "MANSION", "TREES", "LAKE",
+  "POINT", "PLACE", "MANSION", "TREES", "LAKE", "CANOPY", "BOTANNIA",
+  "NORMANTON", "LAKEVILLE",
 ] as const;
 
 const ROAD_SUFFIX_RE =

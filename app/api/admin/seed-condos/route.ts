@@ -77,73 +77,31 @@ export async function POST() {
           return;
         }
 
-        // ── Schema setup / migration ────────────────────────────────────────
+        // ── Schema setup (full refresh) ─────────────────────────────────────
 
-        const info = await db.execute("PRAGMA table_info(private_property_master)");
-        const cols = info.rows.map((r) => String(r.name));
+        send({ type: "status", message: "Dropping and recreating tables…" });
+        await db.execute("DROP TABLE IF EXISTS private_property_master");
+        await db.execute("DROP TABLE IF EXISTS private_property_candidates");
 
-        if (cols.length === 0) {
-          await db.execute(`
-            CREATE TABLE IF NOT EXISTS private_property_master (
-              id               INTEGER PRIMARY KEY AUTOINCREMENT,
-              project_name     TEXT    NOT NULL UNIQUE,
-              property_type    TEXT    NOT NULL DEFAULT 'Condo',
-              address          TEXT,
-              postal_codes     TEXT    NOT NULL DEFAULT '[]',
-              block_count      INTEGER NOT NULL DEFAULT 1,
-              lat              REAL    NOT NULL,
-              lng              REAL    NOT NULL,
-              confidence_score INTEGER NOT NULL,
-              source_keyword   TEXT,
-              seeded_at        TEXT    NOT NULL
-            )
-          `);
-        } else if (!cols.includes("postal_codes")) {
-          send({ type: "migration", message: "Migrating master table to per-project schema…" });
-          const { rows: oldRows } = await db.execute("SELECT * FROM private_property_master");
-          const groups = new Map<string, typeof oldRows>();
-          for (const row of oldRows) {
-            const key = normalize(String(row.project_name));
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key)!.push(row);
-          }
-          await db.execute("DROP TABLE IF EXISTS private_property_master_new");
-          await db.execute(`
-            CREATE TABLE private_property_master_new (
-              id               INTEGER PRIMARY KEY AUTOINCREMENT,
-              project_name     TEXT    NOT NULL UNIQUE,
-              property_type    TEXT    NOT NULL DEFAULT 'Condo',
-              address          TEXT,
-              postal_codes     TEXT    NOT NULL DEFAULT '[]',
-              block_count      INTEGER NOT NULL DEFAULT 1,
-              lat              REAL    NOT NULL,
-              lng              REAL    NOT NULL,
-              confidence_score INTEGER NOT NULL,
-              source_keyword   TEXT,
-              seeded_at        TEXT    NOT NULL
-            )
-          `);
-          const migRows = [...groups.values()].map((group) => {
-            const best = group.reduce((b, r) => Number(r.confidence_score) > Number(b.confidence_score) ? r : b, group[0]);
-            const lat  = group.reduce((s, r) => s + Number(r.lat), 0) / group.length;
-            const lng  = group.reduce((s, r) => s + Number(r.lng), 0) / group.length;
-            const postalCodes = [...new Set(group.map((r) => String(r.postal_code)).filter(Boolean))];
-            return {
-              sql:  "INSERT INTO private_property_master_new (project_name, property_type, address, postal_codes, block_count, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-              args: [String(best.project_name), String(best.property_type), String(best.address), JSON.stringify(postalCodes), group.length, lat, lng, Number(best.confidence_score), String(best.source_keyword), String(best.seeded_at)],
-            };
-          });
-          for (let i = 0; i < migRows.length; i += CHUNK) {
-            await db.batch(migRows.slice(i, i + CHUNK), "write");
-          }
-          await db.execute("DROP TABLE private_property_master");
-          await db.execute("ALTER TABLE private_property_master_new RENAME TO private_property_master");
-          send({ type: "migration_done", projects: migRows.length });
-        }
-
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_ppm_loc ON private_property_master(lat, lng)");
         await db.execute(`
-          CREATE TABLE IF NOT EXISTS private_property_candidates (
+          CREATE TABLE private_property_master (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name     TEXT    NOT NULL UNIQUE,
+            property_type    TEXT    NOT NULL DEFAULT 'Condo',
+            address          TEXT,
+            postal_codes     TEXT    NOT NULL DEFAULT '[]',
+            block_count      INTEGER NOT NULL DEFAULT 1,
+            lat              REAL    NOT NULL,
+            lng              REAL    NOT NULL,
+            confidence_score INTEGER NOT NULL,
+            source_keyword   TEXT,
+            seeded_at        TEXT    NOT NULL
+          )
+        `);
+        await db.execute("CREATE INDEX idx_ppm_loc ON private_property_master(lat, lng)");
+
+        await db.execute(`
+          CREATE TABLE private_property_candidates (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             project_name     TEXT    NOT NULL,
             property_type    TEXT    NOT NULL DEFAULT 'Condo',
@@ -158,7 +116,7 @@ export async function POST() {
             UNIQUE(project_name, postal_code)
           )
         `);
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_ppc_loc ON private_property_candidates(lat, lng)");
+        await db.execute("CREATE INDEX idx_ppc_loc ON private_property_candidates(lat, lng)");
 
         // ── Crawl OneMap ────────────────────────────────────────────────────
 
@@ -289,24 +247,14 @@ export async function POST() {
 
         send({ type: "inserting", masters: mergedMasters.length, candidates: dedupedCandidates.length });
 
-        // Write masters (upsert)
+        // Write masters
         for (let i = 0; i < mergedMasters.length; i += CHUNK) {
           await db.batch(
             mergedMasters.slice(i, i + CHUNK).map((r) => ({
               sql:  `INSERT INTO private_property_master
                        (project_name, property_type, address, postal_codes, block_count,
                         lat, lng, confidence_score, source_keyword, seeded_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)
-                     ON CONFLICT(project_name) DO UPDATE SET
-                       property_type=excluded.property_type,
-                       address=excluded.address,
-                       postal_codes=excluded.postal_codes,
-                       block_count=excluded.block_count,
-                       lat=excluded.lat,
-                       lng=excluded.lng,
-                       confidence_score=excluded.confidence_score,
-                       source_keyword=excluded.source_keyword,
-                       seeded_at=excluded.seeded_at`,
+                     VALUES (?,?,?,?,?,?,?,?,?,?)`,
               args: [r.project_name, r.property_type, r.address, r.postal_codes, r.block_count,
                      r.lat, r.lng, r.confidence_score, r.source_keyword, seededAt],
             })),
@@ -314,41 +262,16 @@ export async function POST() {
           );
         }
 
-        // Filter candidates against full master (includes newly seeded)
-        const existingMasterRes = await db.execute(
-          "SELECT project_name FROM private_property_master",
-        );
-        const existingMasterNames = new Set(
-          existingMasterRes.rows.map((r) => normalize(String(r.project_name))),
-        );
+        // Filter candidates: exclude project_names already in master
         const filteredCandidates = dedupedCandidates.filter(
-          (r) => !existingMasterNames.has(normalize(r.project_name)),
+          (r) => !masterProjectNames.has(normalize(r.project_name)),
         );
-
-        // Remove stale candidate rows whose project is now in master
-        const staleRes = await db.execute(
-          "SELECT id, project_name FROM private_property_candidates",
-        );
-        const staleIds = staleRes.rows
-          .filter((r) => existingMasterNames.has(normalize(String(r.project_name))))
-          .map((r) => Number(r.id))
-          .filter(Boolean);
-        if (staleIds.length > 0) {
-          for (let i = 0; i < staleIds.length; i += CHUNK) {
-            const batch = staleIds.slice(i, i + CHUNK);
-            await db.execute({
-              sql:  `DELETE FROM private_property_candidates WHERE id IN (${batch.map(() => "?").join(",")})`,
-              args: batch,
-            });
-          }
-          send({ type: "cleanup", removed: staleIds.length });
-        }
 
         // Write candidates
         for (let i = 0; i < filteredCandidates.length; i += CHUNK) {
           await db.batch(
             filteredCandidates.slice(i, i + CHUNK).map((r) => ({
-              sql:  "INSERT OR IGNORE INTO private_property_candidates (project_name, property_type, address, postal_code, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+              sql:  "INSERT INTO private_property_candidates (project_name, property_type, address, postal_code, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
               args: [r.project_name, r.property_type, r.address, r.postal_code, r.lat, r.lng, r.confidence_score, r.reason, r.source_keyword, seededAt],
             })),
             "write",

@@ -1,8 +1,10 @@
 /**
- * Seed script — discovers all private condos & ECs in Singapore from OneMap
- * using broad search terms + confidence scoring, then writes to Turso.
+ * Seed script — full refresh of private condo / EC data from OneMap.
  *
  * Run: npm run seed:condos
+ *
+ * IMPORTANT: This script DROPS and recreates both tables on every run.
+ * Use `npm run discover` to add new condos without wiping existing data.
  *
  * Required env vars (in .env.local):
  *   TURSO_DATABASE_URL   — libsql://... URL from Turso dashboard
@@ -13,8 +15,6 @@
  *   private_property_candidates — confidence_score 2–3   (needs manual review)
  *
  * Master records are merged per project_name (centroid of all blocks).
- * Reseeding updates centroid + postal codes; manually accepted projects
- * are preserved and enriched with fresh data.
  */
 
 import { config } from "dotenv";
@@ -87,38 +87,32 @@ function normalize(name: string): string {
   return name.toUpperCase().replace(/\s+/g, " ").trim();
 }
 
-// ── Table setup + migration ───────────────────────────────────────────────────
+// ── Table setup (fresh every seed run) ───────────────────────────────────────
 
 async function createTables() {
-  // Check current master schema and migrate if needed
-  const info = await db.execute("PRAGMA table_info(private_property_master)");
-  const cols = info.rows.map((r) => String(r.name));
-
-  if (cols.length === 0) {
-    // Fresh install — create with merged schema
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS private_property_master (
-        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-        project_name     TEXT    NOT NULL UNIQUE,
-        property_type    TEXT    NOT NULL DEFAULT 'Condo',
-        address          TEXT,
-        postal_codes     TEXT    NOT NULL DEFAULT '[]',
-        block_count      INTEGER NOT NULL DEFAULT 1,
-        lat              REAL    NOT NULL,
-        lng              REAL    NOT NULL,
-        confidence_score INTEGER NOT NULL,
-        source_keyword   TEXT,
-        seeded_at        TEXT    NOT NULL
-      )
-    `);
-  } else if (!cols.includes("postal_codes")) {
-    // Old schema (UNIQUE per project+postal) — migrate to merged schema
-    await migrateToMergedSchema();
-  }
-  await db.execute("CREATE INDEX IF NOT EXISTS idx_ppm_loc ON private_property_master(lat, lng)");
+  // Full refresh — drop and recreate both tables
+  await db.execute("DROP TABLE IF EXISTS private_property_master");
+  await db.execute("DROP TABLE IF EXISTS private_property_candidates");
 
   await db.execute(`
-    CREATE TABLE IF NOT EXISTS private_property_candidates (
+    CREATE TABLE private_property_master (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_name     TEXT    NOT NULL UNIQUE,
+      property_type    TEXT    NOT NULL DEFAULT 'Condo',
+      address          TEXT,
+      postal_codes     TEXT    NOT NULL DEFAULT '[]',
+      block_count      INTEGER NOT NULL DEFAULT 1,
+      lat              REAL    NOT NULL,
+      lng              REAL    NOT NULL,
+      confidence_score INTEGER NOT NULL,
+      source_keyword   TEXT,
+      seeded_at        TEXT    NOT NULL
+    )
+  `);
+  await db.execute("CREATE INDEX idx_ppm_loc ON private_property_master(lat, lng)");
+
+  await db.execute(`
+    CREATE TABLE private_property_candidates (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       project_name     TEXT    NOT NULL,
       property_type    TEXT    NOT NULL DEFAULT 'Condo',
@@ -133,55 +127,7 @@ async function createTables() {
       UNIQUE(project_name, postal_code)
     )
   `);
-  await db.execute("CREATE INDEX IF NOT EXISTS idx_ppc_loc ON private_property_candidates(lat, lng)");
-}
-
-async function migrateToMergedSchema() {
-  console.log("  Migrating private_property_master to per-project (merged) schema…");
-  const { rows } = await db.execute("SELECT * FROM private_property_master");
-
-  const groups = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const key = normalize(String(row.project_name));
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(row);
-  }
-
-  await db.execute("DROP TABLE IF EXISTS private_property_master_new");
-  await db.execute(`
-    CREATE TABLE private_property_master_new (
-      id               INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_name     TEXT    NOT NULL UNIQUE,
-      property_type    TEXT    NOT NULL DEFAULT 'Condo',
-      address          TEXT,
-      postal_codes     TEXT    NOT NULL DEFAULT '[]',
-      block_count      INTEGER NOT NULL DEFAULT 1,
-      lat              REAL    NOT NULL,
-      lng              REAL    NOT NULL,
-      confidence_score INTEGER NOT NULL,
-      source_keyword   TEXT,
-      seeded_at        TEXT    NOT NULL
-    )
-  `);
-
-  const insertRows = [...groups.values()].map((group) => {
-    const best = group.reduce((b, r) => Number(r.confidence_score) > Number(b.confidence_score) ? r : b, group[0]);
-    const lat  = group.reduce((s, r) => s + Number(r.lat), 0) / group.length;
-    const lng  = group.reduce((s, r) => s + Number(r.lng), 0) / group.length;
-    const postalCodes = [...new Set(group.map((r) => String(r.postal_code)).filter(Boolean))];
-    return {
-      sql:  "INSERT INTO private_property_master_new (project_name, property_type, address, postal_codes, block_count, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      args: [String(best.project_name), String(best.property_type), String(best.address), JSON.stringify(postalCodes), group.length, lat, lng, Number(best.confidence_score), String(best.source_keyword), String(best.seeded_at)],
-    };
-  });
-
-  for (let i = 0; i < insertRows.length; i += CHUNK) {
-    await db.batch(insertRows.slice(i, i + CHUNK), "write");
-  }
-
-  await db.execute("DROP TABLE private_property_master");
-  await db.execute("ALTER TABLE private_property_master_new RENAME TO private_property_master");
-  console.log(`  Migrated ${insertRows.length} merged projects.`);
+  await db.execute("CREATE INDEX idx_ppc_loc ON private_property_candidates(lat, lng)");
 }
 
 // ── OneMap fetch ──────────────────────────────────────────────────────────────
@@ -344,24 +290,14 @@ async function main() {
     };
   });
 
-  // ── Write masters (upsert — preserves existing manual accepts) ────────────
+  // ── Write masters ─────────────────────────────────────────────────────────
 
   console.log(`\nWriting ${mergedMasters.length} merged master projects to Turso…`);
   const masterRows = mergedMasters.map((r) => ({
     sql: `INSERT INTO private_property_master
             (project_name, property_type, address, postal_codes, block_count,
              lat, lng, confidence_score, source_keyword, seeded_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(project_name) DO UPDATE SET
-            property_type=excluded.property_type,
-            address=excluded.address,
-            postal_codes=excluded.postal_codes,
-            block_count=excluded.block_count,
-            lat=excluded.lat,
-            lng=excluded.lng,
-            confidence_score=excluded.confidence_score,
-            source_keyword=excluded.source_keyword,
-            seeded_at=excluded.seeded_at`,
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
     args: [r.project_name, r.property_type, r.address, r.postal_codes, r.block_count,
            r.lat, r.lng, r.confidence_score, r.source_keyword, seededAt],
   }));
@@ -376,40 +312,15 @@ async function main() {
 
   // ── Filter candidates: exclude project_names already in master ────────────
 
-  const existingMasterRes = await db.execute(
-    "SELECT project_name FROM private_property_master",
-  );
-  const existingMasterNames = new Set(
-    existingMasterRes.rows.map((r) => normalize(String(r.project_name))),
-  );
   const filteredCandidates = dedupedCandidates.filter(
-    (r) => !existingMasterNames.has(normalize(r.project_name)),
+    (r) => !masterProjectNames.has(normalize(r.project_name)),
   );
-
-  // Also remove stale candidate rows whose project is now in master
-  const staleRes = await db.execute(
-    "SELECT id, project_name FROM private_property_candidates",
-  );
-  const staleIds = staleRes.rows
-    .filter((r) => existingMasterNames.has(normalize(String(r.project_name))))
-    .map((r) => Number(r.id))
-    .filter(Boolean);
-  if (staleIds.length > 0) {
-    for (let i = 0; i < staleIds.length; i += CHUNK) {
-      const batch = staleIds.slice(i, i + CHUNK);
-      await db.execute({
-        sql:  `DELETE FROM private_property_candidates WHERE id IN (${batch.map(() => "?").join(",")})`,
-        args: batch,
-      });
-    }
-    console.log(`  Removed ${staleIds.length} stale candidate rows already in master.`);
-  }
 
   // ── Write candidates ──────────────────────────────────────────────────────
 
   console.log(`Writing ${filteredCandidates.length} candidate records to Turso…`);
   const candRows = filteredCandidates.map((r) => ({
-    sql: `INSERT OR IGNORE INTO private_property_candidates
+    sql: `INSERT INTO private_property_candidates
             (project_name, property_type, address, postal_code, lat, lng,
              confidence_score, reason, source_keyword, seeded_at)
           VALUES (?,?,?,?,?,?,?,?,?,?)`,
