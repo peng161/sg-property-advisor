@@ -160,17 +160,31 @@ export async function getPrivateProjectsNearby(
 
   const hasCoords = lat > 0 && lng > 0;
 
+  // Pre-filter to a 5 km bounding box so we don't sort all 1000+ condos.
+  // All condos within the relevant radius are included before scoring.
+  const SEARCH_KM   = 5;
+  const latDelta    = SEARCH_KM / 111.32;
+  const lngDelta    = hasCoords ? SEARCH_KM / (111.32 * Math.cos(lat * Math.PI / 180)) : 1;
+  const latMin      = lat - latDelta;
+  const latMax      = lat + latDelta;
+  const lngMin      = lng - lngDelta;
+  const lngMax      = lng + lngDelta;
+
   try {
     // LEFT JOIN with tx cache so enriched condos get real market scores
-    const result = await db.execute(`
-      SELECT
-        m.project_name, m.property_type, m.address, m.lat, m.lng,
-        c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf
-      FROM private_property_master m
-      LEFT JOIN private_project_tx_cache c
-        ON UPPER(TRIM(c.project_name)) = UPPER(TRIM(m.project_name))
-      WHERE m.lat > 0 AND m.lng > 0
-    `);
+    const result = await db.execute({
+      sql: `
+        SELECT
+          m.project_name, m.property_type, m.address, m.lat, m.lng,
+          c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf
+        FROM private_property_master m
+        LEFT JOIN private_project_tx_cache c
+          ON UPPER(TRIM(c.project_name)) = UPPER(TRIM(m.project_name))
+        WHERE m.lat > 0 AND m.lng > 0
+          ${hasCoords ? "AND m.lat BETWEEN ? AND ? AND m.lng BETWEEN ? AND ?" : ""}
+      `,
+      args: hasCoords ? [latMin, latMax, lngMin, lngMax] : [],
+    });
 
     const scored: ExtendedProjectSummary[] = result.rows.map((row) => {
       const rowLat   = n(row.lat);
@@ -214,8 +228,9 @@ export async function getPrivateProjectsNearby(
     const within = hasCoords
       ? scored.filter((p) => p.distanceKm !== null && p.distanceKm <= NEARBY_DIST_KM).length
       : 0;
-    const top = scored.sort((a, b) => b.propertyScore - a.propertyScore).slice(0, limit);
-    return { projects: top, fromDb: true, count: within };
+    // Sort all candidates by score; the UI's distance filter + slice(0,15) caps the display.
+    scored.sort((a, b) => b.propertyScore - a.propertyScore);
+    return { projects: scored.slice(0, Math.max(limit, 100)), fromDb: true, count: within };
   } catch {
     return { projects: [], fromDb: false, count: 0 };
   }
