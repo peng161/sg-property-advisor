@@ -57,6 +57,15 @@ const REJECT_PHRASES = [
   // Religious
   "CHURCH", "TEMPLE", "MOSQUE", "SYNAGOGUE", "CATHEDRAL",
   "MASJID", "MANDIR",
+  // Petrol stations & fuel brands
+  "ESSO", "CALTEX", "PETRON", "SHELL", "SINOPEC", "PETRONAS",
+  "PETROL STATION", "SERVICE STATION", "FILLING STATION", "PETROLEUM",
+  // Retail / F&B / commercial
+  "SUPERMARKET", "HYPERMARKET", "FAIRPRICE", "COLD STORAGE", "SHENG SIONG",
+  "MCDONALD", "KFC", "SUBWAY", "STARBUCKS", "KOPITIAM",
+  "MINIMART", "CONVENIENCE STORE",
+  // Hotels & serviced apartments (not private residential)
+  "HOTEL", "SERVICED APARTMENT", "SERVICED RESIDENCE",
 ] as const;
 
 // ── Positive signals ──────────────────────────────────────────────────────────
