@@ -1,19 +1,19 @@
 /**
  * Comprehensive condo seeder.
  *
- * Phase 1 — Discovery: scrapes EdgeProp's condo district pages (D01–D28)
- *   to collect every project name. Tries to extract __NEXT_DATA__ JSON first
- *   (fast, no parsing), then falls back to Claude agent for hard pages.
+ * Phase 1 — Discovery: asks Claude (Opus 4.7) to enumerate all Singapore
+ *   private condominiums and ECs it knows about, district by district.
+ *   Validates each name against OneMap — anything not geocodable is dropped.
  *
  * Phase 2 — Geocoding: searches OneMap directly for each project name, groups
- *   all matching blocks into one record (centroid), then upserts into
+ *   all matching blocks into one record (centroid), upserts into
  *   private_property_master.
  *
  * Additive — never drops or overwrites existing master rows.
  * Resumable — skips projects already in the master table.
  *
  * Run:  npm run scrape:condos
- * ETA:  ~15–25 min depending on network and number of projects found.
+ * ETA:  ~15–20 min (Claude call + ~1000 OneMap lookups)
  *
  * Required env vars:
  *   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, ANTHROPIC_API_KEY
@@ -24,7 +24,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { createClient }  from "@libsql/client";
+import { createClient } from "@libsql/client";
 import Anthropic         from "@anthropic-ai/sdk";
 import { classify }      from "../lib/property-classifier";
 
@@ -35,204 +35,114 @@ const db = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN!,
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
-function normalizeForMatch(s: string): string {
+function normalizeKey(s: string): string {
   return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function titleCase(s: string): string {
-  const lower = ["a","an","and","at","by","for","in","of","on","the","to","@"];
+  const stop = new Set(["a","an","and","at","by","for","in","of","on","the","to","@"]);
   return s.toLowerCase().split(" ").map((w, i) =>
-    i === 0 || !lower.includes(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w
+    i === 0 || !stop.has(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w
   ).join(" ");
 }
 
-// ── Phase 1: scrape EdgeProp district pages ───────────────────────────────────
-//
-// EdgeProp district URLs: https://www.edgeprop.sg/condo/d01 … /d28
-// Also 99.co:             https://www.99.co/singapore/condos-apartments?district_code=D01
-//
-// Strategy:
-//   1. Fetch the page HTML
-//   2. Try to extract embedded __NEXT_DATA__ JSON (Next.js SSR data blob)
-//   3. If that fails / yields nothing, use Claude agent to read visible text
+// ── Phase 1: Claude generates comprehensive condo list ────────────────────────
 
-const DISTRICT_COUNT = 28;
-const SCRAPE_DELAY   = 1_500; // ms between portal requests
-
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
-async function fetchHtml(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":      USER_AGENT,
-        Accept:            "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en-SG,en;q=0.9",
-        "Cache-Control":   "no-cache",
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) {
-      process.stdout.write(` HTTP ${res.status}`);
-      return null;
-    }
-    return await res.text();
-  } catch (e) {
-    process.stdout.write(` fetch-err: ${e instanceof Error ? e.message : e}`);
-    return null;
-  }
-}
-
-// Extract visible text from HTML (strip tags)
-function htmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 8000);
-}
-
-// Try to pull project names from __NEXT_DATA__ JSON blob embedded in the page
-function extractFromNextData(html: string): string[] {
-  const m = html.match(/<script id="__NEXT_DATA__"[^>]*>(\{[\s\S]*?\})<\/script>/);
-  if (!m) return [];
-
-  try {
-    const data = JSON.parse(m[1]) as unknown;
-    const names: string[] = [];
-
-    // Walk the JSON tree looking for strings that look like project names
-    function walk(node: unknown) {
-      if (!node || typeof node !== "object") return;
-      if (Array.isArray(node)) { node.forEach(walk); return; }
-      const obj = node as Record<string, unknown>;
-      for (const [key, val] of Object.entries(obj)) {
-        // Common keys that hold project names across portals
-        if (
-          typeof val === "string" &&
-          (key === "name" || key === "project_name" || key === "projectName" ||
-           key === "title" || key === "label" || key === "heading") &&
-          val.length >= 4 && val.length <= 80 &&
-          // crude filter: must have at least 2 words or look like a named building
-          /[A-Za-z]/.test(val) && !/^https?:/.test(val)
-        ) {
-          names.push(val);
-        }
-        walk(val);
-      }
-    }
-
-    walk(data);
-    // Deduplicate
-    return [...new Set(names)];
-  } catch {
-    return [];
-  }
-}
-
-// Claude agent fallback: ask it to list condo names from page text
 const anthropic = new Anthropic();
 
-async function extractWithClaude(pageText: string, district: string): Promise<string[]> {
-  if (!pageText.trim()) return [];
+async function discoverViaClaudeKnowledge(): Promise<string[]> {
+  console.log("Phase 1: asking Claude to enumerate Singapore condos by district…\n");
 
-  try {
-    const resp = await anthropic.messages.create({
-      model:      "claude-opus-4-7",
-      max_tokens: 1024,
-      messages: [{
-        role:    "user",
-        content:
-          `The following is text from a Singapore property portal page listing condos in district ${district}.\n` +
-          `Extract ALL condo / apartment / EC project names you can see. ` +
-          `Return ONLY a JSON array of strings, no other text. Example: ["Parc Riviera","Seahill"]\n\n` +
-          pageText,
-      }],
-    });
-
-    const text = resp.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-
-    const m = text.match(/\[[\s\S]*\]/);
-    if (!m) return [];
-    return (JSON.parse(m[0]) as unknown[])
-      .filter((v): v is string => typeof v === "string" && v.length > 3)
-      .map((s) => s.trim());
-  } catch {
-    return [];
-  }
-}
-
-interface ScrapedProject {
-  name:     string;    // title-cased display name
-  district: string;
-}
-
-async function scrapeDistrict(district: string): Promise<ScrapedProject[]> {
-  const pad    = district.padStart(2, "0");
-  const urls   = [
-    `https://www.edgeprop.sg/condo/d${pad}`,
-    `https://www.99.co/singapore/condos-apartments?district_code=D${district.padStart(2,"0")}`,
+  const districts = [
+    "D01 Boat Quay / Raffles Place / Marina",
+    "D02 Chinatown / Tanjong Pagar",
+    "D03 Alexandra / Commonwealth",
+    "D04 Harbourfront / Telok Blangah",
+    "D05 Buona Vista / West Coast / Clementi",
+    "D06 City Hall / Clarke Quay",
+    "D07 Beach Road / Bugis / Rochor",
+    "D08 Farrer Park / Serangoon Road",
+    "D09 Orchard / River Valley",
+    "D10 Bukit Timah / Holland Village / Tanglin",
+    "D11 Novena / Newton / Thomson",
+    "D12 Balestier / Toa Payoh / Serangoon",
+    "D13 Macpherson / Potong Pasir",
+    "D14 Eunos / Geylang / Paya Lebar",
+    "D15 East Coast / Marine Parade / Katong",
+    "D16 Bedok / Upper East Coast / Eastwood",
+    "D17 Changi / Loyang / Pasir Ris",
+    "D18 Pasir Ris / Tampines",
+    "D19 Hougang / Punggol / Sengkang",
+    "D20 Ang Mo Kio / Bishan / Thomson",
+    "D21 Clementi Park / Upper Bukit Timah",
+    "D22 Boon Lay / Jurong / Tuas",
+    "D23 Bukit Batok / Bukit Panjang / Choa Chu Kang",
+    "D24 Lim Chu Kang / Tengah",
+    "D25 Admiralty / Woodlands",
+    "D26 Mandai / Upper Thomson",
+    "D27 Sembawang / Yishun",
+    "D28 Seletar / Yio Chu Kang",
   ];
 
-  for (const url of urls) {
-    const html = await fetchHtml(url);
-    if (!html) continue;
+  const allNames: string[] = [];
 
-    // Try __NEXT_DATA__ first (fast, structured)
-    let names = extractFromNextData(html);
+  // Query Claude district by district so the list stays focused and complete
+  for (let i = 0; i < districts.length; i++) {
+    const district = districts[i];
+    process.stdout.write(`  [${String(i + 1).padStart(2)}/28] ${district} … `);
 
-    // Fallback: Claude on visible text
-    if (names.length < 3) {
-      const text = htmlToText(html);
-      names = await extractWithClaude(text, district);
+    try {
+      const resp = await anthropic.messages.create({
+        model:      "claude-opus-4-7",
+        max_tokens: 2048,
+        messages: [{
+          role: "user",
+          content:
+            `List every private condominium and Executive Condominium (EC) project in Singapore's ${district} that you know of.\n` +
+            `Include all projects: completed, under construction, and recently launched up to your knowledge cutoff.\n` +
+            `Return ONLY a JSON array of project name strings. No explanation, no extra text.\n` +
+            `Example: ["Parc Riviera","Twin VEW","Seahill"]`,
+        }],
+      });
+
+      const text = resp.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+
+      const m = text.match(/\[[\s\S]*\]/);
+      if (m) {
+        const names = (JSON.parse(m[0]) as unknown[])
+          .filter((v): v is string => typeof v === "string" && v.trim().length > 2)
+          .map((s) => s.trim());
+        allNames.push(...names);
+        process.stdout.write(`${names.length} found\n`);
+      } else {
+        process.stdout.write("no JSON returned\n");
+      }
+    } catch (e) {
+      process.stdout.write(`error: ${e instanceof Error ? e.message : e}\n`);
     }
 
-    if (names.length > 0) {
-      return names.map((n) => ({ name: titleCase(n), district }));
-    }
+    await sleep(500); // small pause between district queries
   }
 
-  return [];
-}
-
-async function discoverProjects(): Promise<Map<string, string>> {
-  // name (normalized) → display name
-  const projectMap = new Map<string, string>();
-
-  console.log("Phase 1: scraping EdgeProp / 99.co district pages…\n");
-
-  for (let d = 1; d <= DISTRICT_COUNT; d++) {
-    const district = String(d).padStart(2, "0");
-    process.stdout.write(`  District ${district}/${DISTRICT_COUNT}… `);
-
-    const results = await scrapeDistrict(district);
-    let added = 0;
-    for (const { name } of results) {
-      const key = normalizeForMatch(name);
-      if (key.length < 4) continue;
-      if (!projectMap.has(key)) { projectMap.set(key, name); added++; }
-    }
-
-    process.stdout.write(`${results.length} found, ${added} new (total: ${projectMap.size})\n`);
-    await sleep(SCRAPE_DELAY);
+  // Deduplicate by normalised key
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const n of allNames) {
+    const k = normalizeKey(n);
+    if (k.length < 3 || seen.has(k)) continue;
+    seen.add(k);
+    unique.push(n);
   }
 
-  return projectMap;
+  return unique;
 }
 
-// ── Phase 2: geocode each project via OneMap ──────────────────────────────────
+// ── Phase 2: geocode each project name via OneMap ─────────────────────────────
 
 const ONEMAP_SEARCH = "https://www.onemap.gov.sg/api/common/elastic/search";
 const ONEMAP_DELAY  = 250;
@@ -244,13 +154,14 @@ interface Block {
   postal:     string;
   address:    string;
   confidence: number;
+  propType:   "Condo" | "EC";
 }
 
 async function geocodeProject(
   displayName: string,
   token:       string,
 ): Promise<{ blocks: Block[]; propertyType: "Condo" | "EC" } | null> {
-  const normSearch  = normalizeForMatch(displayName);
+  const normSearch  = normalizeKey(displayName);
   const blocks: Block[] = [];
   const seenPostals     = new Set<string>();
   let   propertyType: "Condo" | "EC" = "Condo";
@@ -285,11 +196,14 @@ async function geocodeProject(
 
       if (!lat || !lng) continue;
 
-      const normBuilding = normalizeForMatch(building || searchval);
-      const shorter = normBuilding.length < normSearch.length ? normBuilding : normSearch;
-      const longer  = normBuilding.length < normSearch.length ? normSearch   : normBuilding;
-      if (shorter.length < 4 || !longer.includes(shorter)) continue;
+      // Name must match what we searched for (substring in either direction)
+      const normBuilding = normalizeKey(building || searchval);
+      const shorter = normBuilding.length <= normSearch.length ? normBuilding : normSearch;
+      const longer  = normBuilding.length <= normSearch.length ? normSearch   : normBuilding;
+      if (shorter.length < 3 || !longer.includes(shorter)) continue;
 
+      // Use classifier only for property type + reject obvious non-residential buildings.
+      // We intentionally do NOT gate on bucket/score here — Claude already told us it's a condo.
       const c = classify(building, searchval, address, postal, lat, lng);
       if (c.bucket === "reject") continue;
 
@@ -297,7 +211,7 @@ async function geocodeProject(
       seenPostals.add(postal);
 
       if (c.propertyType === "EC") propertyType = "EC";
-      blocks.push({ lat, lng, postal, address, confidence: c.score });
+      blocks.push({ lat, lng, postal, address, confidence: c.score, propType: c.propertyType });
     }
 
     if (!results.length || page >= totalPages) break;
@@ -307,7 +221,7 @@ async function geocodeProject(
   return blocks.length ? { blocks, propertyType } : null;
 }
 
-// ── Phase 3: upsert into master ───────────────────────────────────────────────
+// ── Phase 3: upsert batch into master ────────────────────────────────────────
 
 const CHUNK = 50;
 
@@ -330,7 +244,7 @@ async function upsertBatch(
         name, propertyType, best.address,
         JSON.stringify(postalCodes), blocks.length,
         lat, lng, best.confidence,
-        "edgeprop-scrape", seededAt,
+        "claude-discovery", seededAt,
       ],
     };
   });
@@ -354,21 +268,19 @@ async function main() {
 
   // ── Phase 1 ──────────────────────────────────────────────────────────────────
 
-  const discovered = await discoverProjects();
-  console.log(`\n✓ Discovered ${discovered.size} unique project names\n`);
+  const discovered = await discoverViaClaudeKnowledge();
+  console.log(`\n✓ Claude enumerated ${discovered.length} unique project names\n`);
 
-  // ── Load already-seeded names (resume support) ────────────────────────────────
+  // ── Skip already-seeded projects ─────────────────────────────────────────────
 
   const existingRes = await db.execute(
     "SELECT UPPER(REPLACE(REPLACE(project_name,' ',''),'-','')) as n FROM private_property_master"
   );
   const existing = new Set(existingRes.rows.map((r) => String(r.n)));
 
-  const toGeocode = [...discovered.entries()]
-    .filter(([key]) => !existing.has(key))
-    .map(([, name]) => name);
+  const toGeocode = discovered.filter((name) => !existing.has(normalizeKey(name)));
 
-  console.log(`Phase 2: geocoding ${toGeocode.length} new projects`);
+  console.log(`Phase 2: geocoding ${toGeocode.length} new projects via OneMap`);
   console.log(`  (${existing.size} already in DB, skipping)\n`);
 
   // ── Phase 2 + 3 ───────────────────────────────────────────────────────────────
@@ -384,15 +296,14 @@ async function main() {
     process.stdout.write(`  [${String(i + 1).padStart(4)}/${toGeocode.length}] ${name.padEnd(48)}`);
 
     const geo = await geocodeProject(name, token);
-
     if (!geo) {
-      process.stdout.write("✗ not found\n");
+      process.stdout.write("✗ not found on OneMap\n");
       notFound++;
       missed.push(name);
     } else {
       process.stdout.write(`✓ ${geo.blocks.length} block(s)\n`);
       geocoded++;
-      pending.push({ name, geo });
+      pending.push({ name: titleCase(name), geo });
     }
 
     if (pending.length >= CHUNK) {
@@ -406,19 +317,17 @@ async function main() {
 
   // ── Report ────────────────────────────────────────────────────────────────────
 
-  const [mCount] = await Promise.all([
-    db.execute("SELECT COUNT(*) as n FROM private_property_master"),
-  ]);
+  const mCount = await db.execute("SELECT COUNT(*) as n FROM private_property_master");
 
   console.log("\n══ Scrape Report ═══════════════════════════════════════════════");
-  console.log(`  Projects discovered  : ${discovered.size}`);
-  console.log(`  Already in DB        : ${existing.size}`);
-  console.log(`  Geocoded & inserted  : ${geocoded}`);
-  console.log(`  Not found on OneMap  : ${notFound}`);
-  console.log(`  DB master total      : ${Number(mCount.rows[0]?.n ?? 0)}`);
+  console.log(`  Claude discovered     : ${discovered.length}`);
+  console.log(`  Already in DB         : ${existing.size}`);
+  console.log(`  Geocoded & inserted   : ${geocoded}`);
+  console.log(`  Not found on OneMap   : ${notFound}`);
+  console.log(`  DB master total       : ${Number(mCount.rows[0]?.n ?? 0)}`);
 
   if (missed.length) {
-    console.log("\n── Not found (new launches or name mismatch) ───────────────────");
+    console.log("\n── Not found on OneMap (new launches or Claude hallucinations) ──");
     for (const m of missed.slice(0, 30)) console.log(`  • ${m}`);
     if (missed.length > 30) console.log(`  … and ${missed.length - 30} more`);
   }

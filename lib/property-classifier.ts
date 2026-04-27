@@ -104,6 +104,7 @@ const BRANDING_WORDS = [
   "WOODS", "HORIZON", "LODGE", "RIDGE", "COVE", "WATERFRONT",
   "EDEN", "BLOSSOMS", "GRAND", "STELLAR", "BIJOU", "MARBELLA",
   "TRILINQ", "TRIZON", "SERENADE", "INFINITI",
+  "BELLE", "TOWER", "SPRING", "VILLE", "PEAK", "AIRE",
 ] as const;
 
 const ROAD_SUFFIX_RE =
@@ -182,15 +183,23 @@ export function classify(
     const isBuildingBlock = /^(BLK|BLOCK)\s*\d/i.test(rawBuilding);
     const startsWithDigit = /^\d/.test(rawBuilding);
     const isRoadName      = ROAD_SUFFIX_RE.test(b);
-    if (!isBuildingBlock && !startsWithDigit && !isRoadName && wordCount >= 2 && wordCount <= 6) {
+    // Multi-word name (classic check) OR single-word compound condo name (e.g. SEAHILL, WESTCOVE)
+    const isCompoundSingleWord = wordCount === 1 && b.length >= 6 && !isBuildingBlock && !startsWithDigit && !isRoadName;
+    if (!isBuildingBlock && !startsWithDigit && !isRoadName &&
+        ((wordCount >= 2 && wordCount <= 6) || isCompoundSingleWord)) {
       score += 2;
       reasons.push("+2 named project");
     }
   }
 
-  // +1 residential branding word (whole-word match only)
+  // +1 residential branding word
+  // Multi-word names: whole-word match. Single-word names: substring match (e.g. HILL in SEAHILL).
+  const isSingleWord = b.split(/\s+/).filter(Boolean).length === 1;
   for (const word of BRANDING_WORDS) {
-    if (new RegExp(`\\b${word}\\b`).test(b)) {
+    const matched = isSingleWord
+      ? b.includes(word)                          // substring — catches SEAHILL, WESTCOVE, etc.
+      : new RegExp(`\\b${word}\\b`).test(b);      // whole-word — avoids false positives in phrases
+    if (matched) {
       score += 1;
       reasons.push(`+1 branding "${word}"`);
       break;
@@ -204,6 +213,6 @@ export function classify(
   const reasonStr    = reasons.join(", ") || "no positive signals";
 
   if (score < 2)  return { bucket: "reject",    score, reason: `score ${score}: ${reasonStr}`, projectName, propertyType };
-  if (score <= 3) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
-  return               { bucket: "master",    score, reason: reasonStr,                       projectName, propertyType };
+  if (score < 3)  return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
+  return                 { bucket: "master",    score, reason: reasonStr,                       projectName, propertyType };
 }
