@@ -41,6 +41,7 @@ const ROAD_SUFFIX_RE = /\b(AVENUE|ROAD|STREET|DRIVE|CRESCENT|WALK|WAY|LANE|CLOSE
 
 const MAX_PAGES = 80;
 const PAGE_DELAY = 120;
+const CHUNK = 500;
 
 interface OneMapResult {
   BUILDING:   string;
@@ -74,6 +75,18 @@ interface SeedRecord {
   reason:           string;
 }
 
+interface MergedMasterRecord {
+  project_name:     string;
+  property_type:    "Condo" | "EC";
+  address:          string;
+  postal_codes:     string;
+  block_count:      number;
+  lat:              number;
+  lng:              number;
+  confidence_score: number;
+  source_keyword:   string;
+}
+
 function classify(
   building: string, searchval: string, address: string,
   postal: string, lat: number, lng: number,
@@ -83,7 +96,6 @@ function classify(
   const a     = address.toUpperCase().trim();
   const combo = `${b} ${a}`;
 
-  // Hard rejects — specific non-residential phrases only
   for (const phrase of REJECT_PHRASES) {
     if (combo.includes(phrase)) {
       return { bucket: "reject", score: 0, reason: `reject: "${phrase}"`, projectName: rawBuilding, propertyType: "Condo" };
@@ -97,7 +109,6 @@ function classify(
   const reasons: string[] = [];
   let isEC = false;
 
-  // +4 definitive condo / EC identifier
   for (const term of HIGH_CONF_TERMS) {
     if (combo.includes(term)) {
       score += 4;
@@ -107,7 +118,6 @@ function classify(
     }
   }
 
-  // +2 named residential project
   const cleanPostal = postal.replace(/\D/g, "");
   if (rawBuilding.length > 0 && cleanPostal.length === 6 && lat && lng) {
     const wordCount       = b.split(/\s+/).filter(Boolean).length;
@@ -121,7 +131,6 @@ function classify(
     }
   }
 
-  // +1 residential branding word (whole-word match)
   for (const word of BRANDING_WORDS) {
     if (new RegExp(`\\b${word}\\b`).test(b)) {
       score += 1;
@@ -134,7 +143,6 @@ function classify(
   const propertyType: "Condo" | "EC" = isEC ? "EC" : "Condo";
   const reasonStr     = reasons.join(", ") || "no positive signals";
 
-  // score >= 4 → master, 2–3 → candidate, < 2 → reject
   if (score < 2)  return { bucket: "reject",    score, reason: `score ${score}: ${reasonStr}`, projectName, propertyType };
   if (score <= 3) return { bucket: "candidate", score, reason: reasonStr,                       projectName, propertyType };
   return                  { bucket: "master",    score, reason: reasonStr,                       projectName, propertyType };
@@ -165,25 +173,71 @@ export async function POST() {
           return;
         }
 
-        // Create tables
-        await db.execute(`
-          CREATE TABLE IF NOT EXISTS private_property_master (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_name     TEXT    NOT NULL,
-            property_type    TEXT    NOT NULL DEFAULT 'Condo',
-            address          TEXT,
-            postal_code      TEXT,
-            lat              REAL    NOT NULL,
-            lng              REAL    NOT NULL,
-            confidence_score INTEGER NOT NULL,
-            source_keyword   TEXT,
-            seeded_at        TEXT    NOT NULL,
-            UNIQUE(project_name, postal_code)
-          )
-        `);
-        await db.execute(
-          "CREATE INDEX IF NOT EXISTS idx_ppm_loc ON private_property_master(lat, lng)"
-        );
+        // ── Schema setup / migration ────────────────────────────────────────
+
+        const info = await db.execute("PRAGMA table_info(private_property_master)");
+        const cols = info.rows.map((r) => String(r.name));
+
+        if (cols.length === 0) {
+          await db.execute(`
+            CREATE TABLE IF NOT EXISTS private_property_master (
+              id               INTEGER PRIMARY KEY AUTOINCREMENT,
+              project_name     TEXT    NOT NULL UNIQUE,
+              property_type    TEXT    NOT NULL DEFAULT 'Condo',
+              address          TEXT,
+              postal_codes     TEXT    NOT NULL DEFAULT '[]',
+              block_count      INTEGER NOT NULL DEFAULT 1,
+              lat              REAL    NOT NULL,
+              lng              REAL    NOT NULL,
+              confidence_score INTEGER NOT NULL,
+              source_keyword   TEXT,
+              seeded_at        TEXT    NOT NULL
+            )
+          `);
+        } else if (!cols.includes("postal_codes")) {
+          send({ type: "migration", message: "Migrating master table to per-project schema…" });
+          const { rows: oldRows } = await db.execute("SELECT * FROM private_property_master");
+          const groups = new Map<string, typeof oldRows>();
+          for (const row of oldRows) {
+            const key = normalize(String(row.project_name));
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(row);
+          }
+          await db.execute("DROP TABLE IF EXISTS private_property_master_new");
+          await db.execute(`
+            CREATE TABLE private_property_master_new (
+              id               INTEGER PRIMARY KEY AUTOINCREMENT,
+              project_name     TEXT    NOT NULL UNIQUE,
+              property_type    TEXT    NOT NULL DEFAULT 'Condo',
+              address          TEXT,
+              postal_codes     TEXT    NOT NULL DEFAULT '[]',
+              block_count      INTEGER NOT NULL DEFAULT 1,
+              lat              REAL    NOT NULL,
+              lng              REAL    NOT NULL,
+              confidence_score INTEGER NOT NULL,
+              source_keyword   TEXT,
+              seeded_at        TEXT    NOT NULL
+            )
+          `);
+          const migRows = [...groups.values()].map((group) => {
+            const best = group.reduce((b, r) => Number(r.confidence_score) > Number(b.confidence_score) ? r : b, group[0]);
+            const lat  = group.reduce((s, r) => s + Number(r.lat), 0) / group.length;
+            const lng  = group.reduce((s, r) => s + Number(r.lng), 0) / group.length;
+            const postalCodes = [...new Set(group.map((r) => String(r.postal_code)).filter(Boolean))];
+            return {
+              sql:  "INSERT INTO private_property_master_new (project_name, property_type, address, postal_codes, block_count, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+              args: [String(best.project_name), String(best.property_type), String(best.address), JSON.stringify(postalCodes), group.length, lat, lng, Number(best.confidence_score), String(best.source_keyword), String(best.seeded_at)],
+            };
+          });
+          for (let i = 0; i < migRows.length; i += CHUNK) {
+            await db.batch(migRows.slice(i, i + CHUNK), "write");
+          }
+          await db.execute("DROP TABLE private_property_master");
+          await db.execute("ALTER TABLE private_property_master_new RENAME TO private_property_master");
+          send({ type: "migration_done", projects: migRows.length });
+        }
+
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ppm_loc ON private_property_master(lat, lng)");
         await db.execute(`
           CREATE TABLE IF NOT EXISTS private_property_candidates (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,9 +254,9 @@ export async function POST() {
             UNIQUE(project_name, postal_code)
           )
         `);
-        await db.execute(
-          "CREATE INDEX IF NOT EXISTS idx_ppc_loc ON private_property_candidates(lat, lng)"
-        );
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_ppc_loc ON private_property_candidates(lat, lng)");
+
+        // ── Crawl OneMap ────────────────────────────────────────────────────
 
         const token    = process.env.ONEMAP_TOKEN ?? "";
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -280,7 +334,8 @@ export async function POST() {
           send({ type: "keyword_done", keyword, master: masters.length, candidate: candidates.length });
         }
 
-        // Deduplicate
+        // ── Deduplicate ─────────────────────────────────────────────────────
+
         const masterMap = new Map<string, SeedRecord>();
         for (const r of allMasters) {
           const key = `${normalize(r.project_name)}|${r.postal_code}`;
@@ -289,65 +344,107 @@ export async function POST() {
         }
         const dedupedMasters = [...masterMap.values()];
 
+        // Exclude candidates whose project_name is in the master set
+        const masterProjectNames = new Set(
+          [...masterMap.keys()].map((k) => k.split("|")[0]),
+        );
         const candidateMap = new Map<string, SeedRecord>();
         for (const r of allCandidates) {
+          if (masterProjectNames.has(normalize(r.project_name))) continue;
           const key = `${normalize(r.project_name)}|${r.postal_code}`;
-          if (masterMap.has(key)) continue;
           if (!candidateMap.has(key)) candidateMap.set(key, r);
         }
+        const dedupedCandidates = [...candidateMap.values()];
 
-        // Exclude anything already promoted to master in a previous run
-        const existingMasterRes = await db.execute(
-          "SELECT project_name, postal_code FROM private_property_master",
-        );
-        const existingMasterKeys = new Set(
-          existingMasterRes.rows.map(
-            (r) => `${normalize(String(r.project_name))}|${String(r.postal_code)}`,
-          ),
-        );
-        const dedupedCandidates = [...candidateMap.values()].filter(
-          (r) => !existingMasterKeys.has(`${normalize(r.project_name)}|${r.postal_code}`),
-        );
+        // ── Merge masters by project_name ───────────────────────────────────
 
-        // Also clean up any stale candidates that were previously accepted
-        if (existingMasterKeys.size > 0) {
-          const staleCheck = await db.execute(
-            "SELECT id, project_name, postal_code FROM private_property_candidates",
-          );
-          const staleIds = staleCheck.rows
-            .filter((r) => existingMasterKeys.has(`${normalize(String(r.project_name))}|${String(r.postal_code)}`))
-            .map((r) => Number(r.id))
-            .filter(Boolean);
-          if (staleIds.length > 0) {
-            const CHUNK = 500;
-            for (let i = 0; i < staleIds.length; i += CHUNK) {
-              const batch = staleIds.slice(i, i + CHUNK);
-              await db.execute({
-                sql:  `DELETE FROM private_property_candidates WHERE id IN (${batch.map(() => "?").join(",")})`,
-                args: batch,
-              });
-            }
-            send({ type: "cleanup", removed: staleIds.length });
-          }
+        const projectGroupMap = new Map<string, SeedRecord[]>();
+        for (const r of dedupedMasters) {
+          const key = normalize(r.project_name);
+          if (!projectGroupMap.has(key)) projectGroupMap.set(key, []);
+          projectGroupMap.get(key)!.push(r);
         }
 
-        send({ type: "inserting", masters: dedupedMasters.length, candidates: dedupedCandidates.length });
+        const mergedMasters: MergedMasterRecord[] = [...projectGroupMap.values()].map((records) => {
+          const best = records.reduce((b, r) => r.confidence_score > b.confidence_score ? r : b, records[0]);
+          const lat  = records.reduce((s, r) => s + r.lat, 0) / records.length;
+          const lng  = records.reduce((s, r) => s + r.lng, 0) / records.length;
+          const postalCodes = [...new Set(records.map((r) => r.postal_code).filter(Boolean))];
+          return {
+            project_name:     best.project_name,
+            property_type:    best.property_type,
+            address:          best.address,
+            postal_codes:     JSON.stringify(postalCodes),
+            block_count:      records.length,
+            lat,
+            lng,
+            confidence_score: best.confidence_score,
+            source_keyword:   best.source_keyword,
+          };
+        });
 
-        const CHUNK = 500;
-        for (let i = 0; i < dedupedMasters.length; i += CHUNK) {
+        send({ type: "inserting", masters: mergedMasters.length, candidates: dedupedCandidates.length });
+
+        // Write masters (upsert)
+        for (let i = 0; i < mergedMasters.length; i += CHUNK) {
           await db.batch(
-            dedupedMasters.slice(i, i + CHUNK).map((r) => ({
-              sql:  "INSERT OR REPLACE INTO private_property_master (project_name, property_type, address, postal_code, lat, lng, confidence_score, source_keyword, seeded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              args: [r.project_name, r.property_type, r.address, r.postal_code, r.lat, r.lng, r.confidence_score, r.source_keyword, seededAt],
+            mergedMasters.slice(i, i + CHUNK).map((r) => ({
+              sql:  `INSERT INTO private_property_master
+                       (project_name, property_type, address, postal_codes, block_count,
+                        lat, lng, confidence_score, source_keyword, seeded_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT(project_name) DO UPDATE SET
+                       property_type=excluded.property_type,
+                       address=excluded.address,
+                       postal_codes=excluded.postal_codes,
+                       block_count=excluded.block_count,
+                       lat=excluded.lat,
+                       lng=excluded.lng,
+                       confidence_score=excluded.confidence_score,
+                       source_keyword=excluded.source_keyword,
+                       seeded_at=excluded.seeded_at`,
+              args: [r.project_name, r.property_type, r.address, r.postal_codes, r.block_count,
+                     r.lat, r.lng, r.confidence_score, r.source_keyword, seededAt],
             })),
             "write",
           );
         }
 
-        for (let i = 0; i < dedupedCandidates.length; i += CHUNK) {
+        // Filter candidates against full master (includes newly seeded)
+        const existingMasterRes = await db.execute(
+          "SELECT project_name FROM private_property_master",
+        );
+        const existingMasterNames = new Set(
+          existingMasterRes.rows.map((r) => normalize(String(r.project_name))),
+        );
+        const filteredCandidates = dedupedCandidates.filter(
+          (r) => !existingMasterNames.has(normalize(r.project_name)),
+        );
+
+        // Remove stale candidate rows whose project is now in master
+        const staleRes = await db.execute(
+          "SELECT id, project_name FROM private_property_candidates",
+        );
+        const staleIds = staleRes.rows
+          .filter((r) => existingMasterNames.has(normalize(String(r.project_name))))
+          .map((r) => Number(r.id))
+          .filter(Boolean);
+        if (staleIds.length > 0) {
+          for (let i = 0; i < staleIds.length; i += CHUNK) {
+            const batch = staleIds.slice(i, i + CHUNK);
+            await db.execute({
+              sql:  `DELETE FROM private_property_candidates WHERE id IN (${batch.map(() => "?").join(",")})`,
+              args: batch,
+            });
+          }
+          send({ type: "cleanup", removed: staleIds.length });
+        }
+
+        // Write candidates
+        for (let i = 0; i < filteredCandidates.length; i += CHUNK) {
           await db.batch(
-            dedupedCandidates.slice(i, i + CHUNK).map((r) => ({
-              sql:  "INSERT OR IGNORE INTO private_property_candidates (project_name, property_type, address, postal_code, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            filteredCandidates.slice(i, i + CHUNK).map((r) => ({
+              sql:  "INSERT OR IGNORE INTO private_property_candidates (project_name, property_type, address, postal_code, lat, lng, confidence_score, reason, source_keyword, seeded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
               args: [r.project_name, r.property_type, r.address, r.postal_code, r.lat, r.lng, r.confidence_score, r.reason, r.source_keyword, seededAt],
             })),
             "write",
@@ -361,8 +458,8 @@ export async function POST() {
 
         send({
           type:           "done",
-          written_master: dedupedMasters.length,
-          written_cand:   dedupedCandidates.length,
+          written_master: mergedMasters.length,
+          written_cand:   filteredCandidates.length,
           total_master:   Number(masterCount.rows[0]?.n ?? 0),
           total_cand:     Number(candidateCount.rows[0]?.n ?? 0),
         });
