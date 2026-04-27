@@ -798,19 +798,9 @@ export default function ResultsDashboard({
 
   const hasCoords = lat > 0 && lng > 0;
 
-  // Distance band for proximity-first sorting (0 = closest)
-  function distBand(km: number | null): number {
-    if (km === null) return 5;
-    if (km < 0.5)  return 0;
-    if (km < 1.0)  return 1;
-    if (km < 1.5)  return 2;
-    if (km < 2.0)  return 3;
-    return 4;
-  }
-
-  // Private Condo listings — filtered then sorted:
-  //   distance filter active → proximity band first, score within band
-  //   "All"                  → pure score order (best regardless of distance)
+  // Private Condo listings — filter then re-rank by score for the visible set.
+  // Score already incorporates distance, so rank 1 is always the best condo
+  // within the current radius. Changing the radius triggers a full re-rank.
   const displayedListings = propertyTab === "Condo"
     ? privateListings
         .filter((p) => {
@@ -823,11 +813,7 @@ export default function ResultsDashboard({
           if (distanceFilter !== "all" && (p.distanceKm === null || p.distanceKm > distanceFilter)) return false;
           return true;
         })
-        .sort((a, b) => {
-          if (distanceFilter === "all") return b.propertyScore - a.propertyScore;
-          const bd = distBand(a.distanceKm) - distBand(b.distanceKm);
-          return bd !== 0 ? bd : b.propertyScore - a.propertyScore;
-        })
+        .sort((a, b) => b.propertyScore - a.propertyScore)
         .slice(0, 15)
     : [];
 
