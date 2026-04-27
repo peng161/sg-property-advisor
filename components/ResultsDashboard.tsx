@@ -761,7 +761,7 @@ export default function ResultsDashboard({
 
   // Section 2 filters
   const [minScoreFilter, setMinScoreFilter] = useState(0);
-  const [distanceFilter, setDistanceFilter] = useState<number | "all">("all");
+  const [distanceFilter, setDistanceFilter] = useState<number | "all">(1.5);
 
   // Mobile menu / filter drawer
   const [showMobileMenu, setShowMobileMenu] = useState(false);
