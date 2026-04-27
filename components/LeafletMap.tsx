@@ -320,7 +320,9 @@ export default function LeafletMap({
       condos.forEach((c) => {
         if (topLatLngs.has(`${c.lat.toFixed(4)},${c.lng.toFixed(4)}`)) return;
 
-        const score = c.confidence_score ?? 43;
+        // Use distance to user's home as a simple relevance score (higher = closer)
+        const dist  = c.distance_km ?? 10;
+        const score = dist < 0.5 ? 88 : dist < 1 ? 78 : dist < 1.5 ? 68 : dist < 2 ? 58 : 43;
         const color = score >= 80 ? C.emerald : score >= 65 ? "#f59e0b" : "#ef4444";
         const icon  = L.divIcon({
           className:  "",

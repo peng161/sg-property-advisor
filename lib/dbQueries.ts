@@ -120,21 +120,39 @@ export async function getHdbNearby(
 }
 
 // ── Private projects nearby ───────────────────────────────────────────────────
-// Source: private_property_master table (seeded via `npm run seed:condos` or the /explore page button).
-// Ranks by proximity — price/tenure data not available from OneMap seed.
 
 function scoreByDistance(distKm: number): number {
-  if (distKm < 0.5)  return 90;
-  if (distKm < 1.0)  return 80;
-  if (distKm < 1.5)  return 70;
-  if (distKm < 2.0)  return 60;
-  if (distKm < 5.0)  return 45;
-  if (distKm < 10.0) return 30;
-  return 20;
+  if (distKm < 0.5)  return 88;
+  if (distKm < 1.0)  return 78;
+  if (distKm < 1.5)  return 68;
+  if (distKm < 2.0)  return 58;
+  if (distKm < 5.0)  return 43;
+  if (distKm < 10.0) return 28;
+  return 18;
+}
+
+// PSF (SGD/sqft) × 10.764 = PSM (SGD/sqm)
+const PSF_TO_PSM = 10.764;
+
+function scoreWithTxData(
+  medianPsf: number, txCount: number, trendLabel: string,
+  budget: number, distKm: number | null,
+): number {
+  let s = 30;
+  const dist = distKm ?? 10;
+  s += dist < 0.5 ? 30 : dist < 1 ? 26 : dist < 2 ? 22 : dist < 5 ? 16 : dist < 10 ? 10 : 5;
+  // Affordability: estimated 2BR price (55 sqm)
+  const est2BR = medianPsf * PSF_TO_PSM * 55;
+  s += est2BR <= budget ? 18 : est2BR <= budget * 1.15 ? 10 : 3;
+  // Trend
+  s += trendLabel === "Rising" ? 12 : trendLabel === "Stable" ? 8 : trendLabel === "Softening" ? 2 : 4;
+  // Liquidity
+  s += Math.min(Math.floor(txCount / 4), 6);
+  return Math.min(Math.round(s), 99);
 }
 
 export async function getPrivateProjectsNearby(
-  lat: number, lng: number, _budget: number, limit = 15,
+  lat: number, lng: number, budget: number, limit = 15,
 ): Promise<{ projects: ExtendedProjectSummary[]; fromDb: boolean; count: number }> {
   let db;
   try { db = getDb(); } catch { return { projects: [], fromDb: false, count: 0 }; }
@@ -143,30 +161,50 @@ export async function getPrivateProjectsNearby(
   const hasCoords = lat > 0 && lng > 0;
 
   try {
-    const result = await db.execute(
-      "SELECT project_name, property_type, address, lat, lng FROM private_property_master WHERE lat > 0 AND lng > 0",
-    );
+    // LEFT JOIN with tx cache so enriched condos get real market scores
+    const result = await db.execute(`
+      SELECT
+        m.project_name, m.property_type, m.address, m.lat, m.lng,
+        c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf
+      FROM private_property_master m
+      LEFT JOIN private_project_tx_cache c
+        ON UPPER(TRIM(c.project_name)) = UPPER(TRIM(m.project_name))
+      WHERE m.lat > 0 AND m.lng > 0
+    `);
 
     const scored: ExtendedProjectSummary[] = result.rows.map((row) => {
-      const rowLat = n(row.lat);
-      const rowLng = n(row.lng);
-      const distKm = hasCoords
+      const rowLat   = n(row.lat);
+      const rowLng   = n(row.lng);
+      const distKm   = hasCoords
         ? Math.round(haversineKm(lat, lng, rowLat, rowLng) * 10) / 10
         : null;
+
+      const medianPsf  = row.median_psf_12m != null ? n(row.median_psf_12m) : 0;
+      const txCount    = row.last_12m_tx_count != null ? n(row.last_12m_tx_count) : 0;
+      const trendLabel = s(row.price_trend_label) || "";
+      const medianPsm  = medianPsf > 0 ? Math.round(medianPsf * PSF_TO_PSM) : 0;
+      const trend3Y    = trendLabel === "Rising" ? 10 : trendLabel === "Softening" ? -5 : 2;
+
+      const propertyScore = medianPsf > 0 && distKm !== null
+        ? scoreWithTxData(medianPsf, txCount, trendLabel, budget, distKm)
+        : distKm !== null ? scoreByDistance(distKm) : 50;
+
+      const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
+
       return {
         project:       s(row.project_name),
         street:        s(row.address),
         tenure:        "Unknown",
         marketSegment: "OCR" as const,
-        minPrice:      0,
-        maxPrice:      0,
-        medianPsm:     0,
-        txCount:       0,
+        minPrice:      est2BR,
+        maxPrice:      medianPsm > 0 ? medianPsm * 100 : 0,
+        medianPsm,
+        txCount,
         latestDate:    "",
         minSqm:        0,
         maxSqm:        0,
-        propertyScore: distKm !== null ? scoreByDistance(distKm) : 50,
-        trend3Y:       0,
+        propertyScore,
+        trend3Y,
         distanceKm:    distKm,
         projectLat:    rowLat,
         projectLng:    rowLng,
