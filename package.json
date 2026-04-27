@@ -12,7 +12,8 @@
     "discover": "tsx scripts/discover-condos.ts",
     "research:tx": "tsx scripts/research-transactions.ts",
     "scrape:condos": "tsx scripts/scrape-all-condos.ts",
-    "seed:tenure": "tsx scripts/seed-tenure.ts"
+    "seed:tenure": "tsx scripts/seed-tenure.ts",
+    "seed:lease-years": "tsx scripts/seed-lease-years.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

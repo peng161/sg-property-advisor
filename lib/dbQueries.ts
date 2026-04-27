@@ -41,18 +41,17 @@ function scoreHdb(
   return Math.round(leaseScore + priceScore + floorScore + distScore);
 }
 
-function scorePrivate(
-  minPrice: number, tenure: string, txCount: number,
-  trend3Y: number, budget: number, distKm: number,
-): number {
-  let s = 30;
-  s += distKm < 0.5 ? 30 : distKm < 1 ? 26 : distKm < 2 ? 22
-      : distKm < 5 ? 16 : distKm < 10 ? 10 : distKm < 20 ? 5 : 2;
-  s += minPrice <= budget ? 18 : minPrice <= budget * 1.1 ? 10 : 3;
-  s += trend3Y > 20 ? 12 : trend3Y > 10 ? 8 : trend3Y > 0 ? 4 : 0;
-  s += Math.min(Math.floor(txCount / 4), 6);
-  s += (tenure.includes("Freehold") || tenure.includes("999")) ? 4 : 1;
-  return Math.min(Math.round(s), 99);
+// Remaining lease adjustment for private condos.
+// Freehold/999yr: premium (+5). 99yr with fresh lease: neutral.
+// Short leases hurt financing: banks restrict LTV below ~60yr remaining.
+function leaseAdjustment(tenure: string, remainingLease: number | null): number {
+  if (tenure.includes("Freehold") || tenure.includes("999")) return 5;
+  if (remainingLease === null) return -3;   // unknown — mild uncertainty penalty
+  if (remainingLease >= 80) return  0;
+  if (remainingLease >= 70) return -5;
+  if (remainingLease >= 60) return -12;     // banks may reduce LTV
+  if (remainingLease >= 50) return -20;     // significant financing restriction
+  return -28;                               // <50yr: very hard to finance / resell
 }
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
@@ -121,14 +120,12 @@ export async function getHdbNearby(
 
 // ── Private projects nearby ───────────────────────────────────────────────────
 
-function scoreByDistance(distKm: number): number {
-  if (distKm < 0.5)  return 88;
-  if (distKm < 1.0)  return 78;
-  if (distKm < 1.5)  return 68;
-  if (distKm < 2.0)  return 58;
-  if (distKm < 5.0)  return 43;
-  if (distKm < 10.0) return 28;
-  return 18;
+function scoreByDistance(
+  distKm: number, tenure: string, remainingLease: number | null,
+): number {
+  const base = distKm < 0.5 ? 88 : distKm < 1.0 ? 78 : distKm < 1.5 ? 68
+    : distKm < 2.0 ? 58 : distKm < 5.0 ? 43 : distKm < 10.0 ? 28 : 18;
+  return Math.min(Math.max(base + leaseAdjustment(tenure, remainingLease), 5), 99);
 }
 
 // PSF (SGD/sqft) × 10.764 = PSM (SGD/sqm)
@@ -137,6 +134,7 @@ const PSF_TO_PSM = 10.764;
 function scoreWithTxData(
   medianPsf: number, txCount: number, trendLabel: string,
   budget: number, distKm: number | null,
+  tenure: string, remainingLease: number | null,
 ): number {
   let s = 30;
   const dist = distKm ?? 10;
@@ -148,7 +146,9 @@ function scoreWithTxData(
   s += trendLabel === "Rising" ? 12 : trendLabel === "Stable" ? 8 : trendLabel === "Softening" ? 2 : 4;
   // Liquidity
   s += Math.min(Math.floor(txCount / 4), 6);
-  return Math.min(Math.round(s), 99);
+  // Lease
+  s += leaseAdjustment(tenure, remainingLease);
+  return Math.min(Math.max(Math.round(s), 5), 99);
 }
 
 export async function getPrivateProjectsNearby(
@@ -201,18 +201,19 @@ export async function getPrivateProjectsNearby(
       const medianPsm  = medianPsf > 0 ? Math.round(medianPsf * PSF_TO_PSM) : 0;
       const trend3Y    = trendLabel === "Rising" ? 10 : trendLabel === "Softening" ? -5 : 2;
 
-      const propertyScore = medianPsf > 0 && distKm !== null
-        ? scoreWithTxData(medianPsf, txCount, trendLabel, budget, distKm)
-        : distKm !== null ? scoreByDistance(distKm) : 50;
-
-      const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
-
+      // Compute tenure + remaining lease before scoring (lease affects score)
       const tenure      = row.tenure ? s(row.tenure) : "Unknown";
       const leaseStart  = row.lease_commencement_year ? n(row.lease_commencement_year) : null;
       const leaseYears  = tenure.includes("999") ? 999 : tenure.includes("99") ? 99 : null;
       const remainingLease = leaseYears && leaseStart
         ? Math.max(0, leaseStart + leaseYears - currentYear)
         : null;
+
+      const propertyScore = medianPsf > 0 && distKm !== null
+        ? scoreWithTxData(medianPsf, txCount, trendLabel, budget, distKm, tenure, remainingLease)
+        : distKm !== null ? scoreByDistance(distKm, tenure, remainingLease) : 50;
+
+      const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
       return {
         project:       s(row.project_name),
         street:        s(row.address),
