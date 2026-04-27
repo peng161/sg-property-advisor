@@ -238,9 +238,10 @@ export async function getPrivateProjectsNearby(
     const within = hasCoords
       ? scored.filter((p) => p.distanceKm !== null && p.distanceKm <= NEARBY_DIST_KM).length
       : 0;
-    // Sort all candidates by score; the UI's distance filter + slice(0,15) caps the display.
+    // Return all condos in the bounding box — client applies distance filter + slice(0,15).
+    // A server-side score cap here would silently drop condos that are visible at wider radii.
     scored.sort((a, b) => b.propertyScore - a.propertyScore);
-    return { projects: scored.slice(0, Math.max(limit, 100)), fromDb: true, count: within };
+    return { projects: scored, fromDb: true, count: within };
   } catch {
     return { projects: [], fromDb: false, count: 0 };
   }
