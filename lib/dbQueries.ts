@@ -178,7 +178,7 @@ export async function getPrivateProjectsNearby(
         SELECT
           m.project_name, m.property_type, m.address, m.lat, m.lng,
           m.tenure, m.lease_commencement_year,
-          c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf
+          c.median_psf_12m, c.last_12m_tx_count, c.price_trend_label, c.latest_psf, c.units_json
         FROM private_property_master m
         LEFT JOIN private_project_tx_cache c
           ON UPPER(TRIM(c.project_name)) = UPPER(TRIM(m.project_name))
@@ -213,7 +213,18 @@ export async function getPrivateProjectsNearby(
         ? scoreWithTxData(medianPsf, txCount, trendLabel, budget, distKm, tenure, remainingLease)
         : distKm !== null ? scoreByDistance(distKm, tenure, remainingLease) : 50;
 
-      const est2BR = medianPsm > 0 ? medianPsm * 70 : 0;
+      // Parse per-bedroom unit data from JSON if available
+      let units: Record<string, { sqm_low: number; sqm_high: number; avg_psf: number; count: number }> | undefined;
+      if (row.units_json) {
+        try { units = JSON.parse(s(row.units_json)); } catch { /* ignore */ }
+      }
+
+      // Use 2BR unit data for minPrice when available, else fall back to overall PSM
+      const unit2BR   = units?.["2BR"];
+      const psm2BR    = unit2BR ? Math.round(unit2BR.avg_psf * PSF_TO_PSM) : medianPsm;
+      const sqm2BRMid = unit2BR ? Math.round((unit2BR.sqm_low + unit2BR.sqm_high) / 2) : 70;
+      const est2BR    = psm2BR > 0 ? psm2BR * sqm2BRMid : 0;
+
       return {
         project:       s(row.project_name),
         street:        s(row.address),
@@ -232,6 +243,7 @@ export async function getPrivateProjectsNearby(
         projectLat:     rowLat,
         projectLng:     rowLng,
         remainingLease,
+        units,
       };
     });
 

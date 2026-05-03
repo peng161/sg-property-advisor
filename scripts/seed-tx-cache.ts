@@ -1,11 +1,13 @@
 /**
  * Bulk transaction cache seeder — scrapes EdgeProp condo overview pages for
- * PSF stats (no login required) and stores them in private_project_tx_cache.
+ * overall PSF stats AND per-bedroom unit sizes + asking PSF.
  *
- * EdgeProp shows "Average S$ X psf / Range S$ X - Y psf (last 12 months)"
- * on every condo-apartment page without authentication.
+ * Per-bedroom data comes from the listing section of the EdgeProp page:
+ *   "$price … N bed(s) … S$ PSF psf"
+ * Size is inferred as price / psf (sqft) → sqm. Penthouses are filtered out.
  *
- * By default skips condos checked within the last 30 days.
+ * By default skips condos checked within the last 30 days (but always
+ * retries entries that previously returned no_data).
  *
  * Usage:
  *   npm run seed:tx-cache                       # fill missing/stale entries
@@ -59,8 +61,7 @@ async function fetchText(url: string): Promise<{ status: number; text: string }>
       .replace(/<style[\s\S]*?<\/style>/gi,  " ")
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/<[^>]+>/g, " ")
-      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
-      .replace(/&#x27;/g, "'")
+      .replace(/&[a-z#0-9]+;/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
     return { status: res.status, text };
@@ -69,44 +70,84 @@ async function fetchText(url: string): Promise<{ status: number; text: string }>
   }
 }
 
-// ── Parse PSF from EdgeProp overview page ─────────────────────────────────────
+// ── Parse overall PSF from EdgeProp overview ──────────────────────────────────
 
-interface ParsedStats {
-  avgPsf:    number;
-  minPsf:    number;
-  maxPsf:    number;
-  hasData:   boolean;
-  is12m:     boolean;
-}
-
-function parsePsfFromPage(text: string): ParsedStats {
-  // EdgeProp text pattern (sale section only — stop before "Rental"):
-  // "Sale Price * Average S$ 1,724 psf Range S$ 1,205 - 1,868 psf Rental Price"
+function parseOverallPsf(text: string): { avgPsf: number; minPsf: number; maxPsf: number } {
   const saleSection = text.match(/Sale Price.*?(?=Rental Price|$)/i)?.[0] ?? "";
-
-  const avgMatch = saleSection.match(/Average\s+S\$\s*([\d,]+)\s*psf/i);
+  const avgMatch   = saleSection.match(/Average\s+S\$\s*([\d,]+)\s*psf/i);
   const rangeMatch = saleSection.match(/Range\s+S\$\s*([\d,]+)\s*[-–]\s*([\d,]+)\s*psf/i);
-
-  const avgPsf = avgMatch  ? parseInt(avgMatch[1].replace(/,/g, ""), 10) : 0;
-  const minPsf = rangeMatch ? parseInt(rangeMatch[1].replace(/,/g, ""), 10) : 0;
-  const maxPsf = rangeMatch ? parseInt(rangeMatch[2].replace(/,/g, ""), 10) : 0;
-
-  const is12m = /last 12 months|12 month|URA sales data/i.test(text);
-
-  return { avgPsf, minPsf, maxPsf, hasData: avgPsf > 0, is12m };
+  return {
+    avgPsf: avgMatch   ? parseInt(avgMatch[1].replace(/,/g, ""), 10) : 0,
+    minPsf: rangeMatch ? parseInt(rangeMatch[1].replace(/,/g, ""), 10) : 0,
+    maxPsf: rangeMatch ? parseInt(rangeMatch[2].replace(/,/g, ""), 10) : 0,
+  };
 }
 
-// ── Derive trend and liquidity labels ─────────────────────────────────────────
+// ── Parse per-bedroom unit sizes + asking PSF from listing section ────────────
+
+export interface UnitTypeData {
+  sqm_low:  number;
+  sqm_high: number;
+  avg_psf:  number;
+  count:    number;
+}
+
+// Max sqm-per-bedroom ratio to filter out penthouses / strata commercial units
+const MAX_SQM_PER_BED = 62;
+
+function parseUnitTypes(text: string): Record<string, UnitTypeData> {
+  // Pattern: $price [% Rental Volume] N bed(s) [• N bath] ... S$ PSF psf
+  const pat = /\$\s*([\d,]+)\s+(?:[\d.]+\s*%[^$]{0,60})?\s*(\d+)\s*beds?[^$]{0,120}S\$\s*([\d,]+)\s*psf/gi;
+
+  const groups: Record<number, { sqm: number; psf: number }[]> = {};
+  let m: RegExpExecArray | null;
+
+  while ((m = pat.exec(text)) !== null) {
+    const price = parseInt(m[1].replace(/,/g, ""), 10);
+    const beds  = parseInt(m[2], 10);
+    const psf   = parseInt(m[3].replace(/,/g, ""), 10);
+
+    if (price < 200_000 || psf < 500 || psf > 8_000 || beds < 1 || beds > 5) continue;
+
+    const sqft = price / psf;
+    const sqm  = Math.round(sqft / 10.764);
+
+    // Filter implausible sizes (too small or likely penthouse)
+    if (sqm < 25 || sqm > beds * MAX_SQM_PER_BED) continue;
+
+    (groups[beds] ??= []).push({ sqm, psf });
+  }
+
+  const labels: Record<number, string> = { 1: "1BR", 2: "2BR", 3: "3BR", 4: "4BR", 5: "5BR" };
+  const out: Record<string, UnitTypeData> = {};
+
+  for (const [bedsStr, data] of Object.entries(groups)) {
+    const label = labels[Number(bedsStr)];
+    if (!label || data.length < 1) continue;
+
+    const avgPsf = Math.round(data.reduce((s, d) => s + d.psf, 0) / data.length);
+    const sqms   = data.map((d) => d.sqm);
+    out[label] = {
+      sqm_low:  Math.min(...sqms),
+      sqm_high: Math.max(...sqms),
+      avg_psf:  avgPsf,
+      count:    data.length,
+    };
+  }
+
+  return out;
+}
+
+// ── Derive trend / liquidity labels ──────────────────────────────────────────
 
 function deriveTrend(text: string): string {
-  // EdgeProp sometimes shows a trend indicator or we can infer nothing reliable
-  if (/rising|increas|upward|climb/i.test(text))      return "Rising";
+  if (/rising|increas|upward|climb/i.test(text))          return "Rising";
   if (/declin|decreas|downward|soften|weaken/i.test(text)) return "Declining";
   return "Stable";
 }
 
 function deriveLiquidity(text: string): string {
-  if (/high transaction volume/i.test(text)) return "High";
+  if (/high transaction volume/i.test(text))              return "High";
   if (/very low.*transaction|no transaction/i.test(text)) return "Very Low";
   return "Unknown";
 }
@@ -114,20 +155,19 @@ function deriveLiquidity(text: string): string {
 // ── Research one condo ────────────────────────────────────────────────────────
 
 interface CacheRow {
-  latestPsf:       number;
-  medianPsf12m:    number;
-  txCount12m:      number;
-  trendLabel:      string;
-  liquidityLabel:  string;
-  confidence:      string;
-  status:          string;
-  note:            string;
+  latestPsf:      number;
+  medianPsf12m:   number;
+  txCount12m:     number;
+  trendLabel:     string;
+  liquidityLabel: string;
+  confidence:     string;
+  status:         string;
+  unitsJson:      string | null;
 }
 
 async function researchCondo(name: string): Promise<CacheRow> {
   const slug = toSlug(name);
 
-  // Try primary URL first, then fallback
   const urls = [
     `https://www.edgeprop.sg/condo-apartment/${slug}`,
     `https://www.edgeprop.sg/condo/${slug}`,
@@ -137,22 +177,25 @@ async function researchCondo(name: string): Promise<CacheRow> {
     const { status, text } = await fetchText(url);
     if (status !== 200 || !text) continue;
 
-    const stats = parsePsfFromPage(text);
-    if (!stats.hasData) continue;
+    const overall = parseOverallPsf(text);
+    if (!overall.avgPsf) continue;
 
-    const median = stats.minPsf && stats.maxPsf
-      ? Math.round((stats.minPsf + stats.maxPsf) / 2)
-      : stats.avgPsf;
+    const median = overall.minPsf && overall.maxPsf
+      ? Math.round((overall.minPsf + overall.maxPsf) / 2)
+      : overall.avgPsf;
+
+    const units = parseUnitTypes(text);
+    const unitsJson = Object.keys(units).length > 0 ? JSON.stringify(units) : null;
 
     return {
-      latestPsf:      stats.avgPsf,
+      latestPsf:      overall.avgPsf,
       medianPsf12m:   median,
-      txCount12m:     0,   // not shown without login
+      txCount12m:     0,
       trendLabel:     deriveTrend(text),
       liquidityLabel: deriveLiquidity(text),
-      confidence:     "medium",
+      confidence:     unitsJson ? "high" : "medium",
       status:         "found",
-      note:           url,
+      unitsJson,
     };
   }
 
@@ -164,7 +207,7 @@ async function researchCondo(name: string): Promise<CacheRow> {
     liquidityLabel: "Unknown",
     confidence:     "low",
     status:         "no_data",
-    note:           "",
+    unitsJson:      null,
   };
 }
 
@@ -175,8 +218,8 @@ async function upsertCache(name: string, row: CacheRow): Promise<void> {
     sql: `INSERT INTO private_project_tx_cache
             (project_name, property_category, latest_psf, median_psf_12m,
              last_12m_tx_count, price_trend_label, liquidity_label,
-             confidence, transaction_status, checked_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)
+             confidence, transaction_status, checked_at, units_json)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(project_name) DO UPDATE SET
             latest_psf        = excluded.latest_psf,
             median_psf_12m    = excluded.median_psf_12m,
@@ -185,10 +228,10 @@ async function upsertCache(name: string, row: CacheRow): Promise<void> {
             liquidity_label   = excluded.liquidity_label,
             confidence        = excluded.confidence,
             transaction_status= excluded.transaction_status,
-            checked_at        = excluded.checked_at`,
+            checked_at        = excluded.checked_at,
+            units_json        = excluded.units_json`,
     args: [
-      name,
-      "private",
+      name, "private",
       row.latestPsf    || null,
       row.medianPsf12m || null,
       row.txCount12m,
@@ -197,6 +240,7 @@ async function upsertCache(name: string, row: CacheRow): Promise<void> {
       row.confidence,
       row.status,
       new Date().toISOString(),
+      row.unitsJson,
     ],
   });
 }
@@ -211,7 +255,7 @@ async function main() {
   const staleThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const skipClause = FORCE_ALL
     ? "1=1"
-    : `(c.project_name IS NULL OR c.checked_at < '${staleThreshold}' OR c.transaction_status = 'no_data')`;
+    : `(c.project_name IS NULL OR c.checked_at < '${staleThreshold}' OR c.transaction_status = 'no_data' OR c.units_json IS NULL)`;
 
   const res = await db.execute(`
     SELECT m.id, m.project_name
@@ -228,19 +272,24 @@ async function main() {
   console.log(`\n${mode} ${todo.length} condos (limit=${LIMIT}, from_id=${FROM_ID})\n`);
   if (!todo.length) { console.log("Nothing to do."); db.close(); return; }
 
-  let done = 0, found = 0, noData = 0, errors = 0;
+  let done = 0, found = 0, withUnits = 0, noData = 0, errors = 0;
 
   for (const { id, name } of todo) {
     const pad = String(done + 1).padStart(4);
-    process.stdout.write(`  ${pad}/${todo.length}  id=${String(id).padStart(5)}  ${name.padEnd(38)}`);
+    process.stdout.write(`  ${pad}/${todo.length}  id=${String(id).padStart(5)}  ${name.padEnd(36)}`);
 
     try {
       const row = await researchCondo(name);
       await upsertCache(name, row);
 
       if (row.status === "found") {
-        process.stdout.write(`  ✓  PSF avg S$${row.latestPsf}  median S$${row.medianPsf12m}\n`);
+        const units = row.unitsJson ? (JSON.parse(row.unitsJson) as Record<string, UnitTypeData>) : {};
+        const unitSummary = Object.entries(units)
+          .map(([k, v]) => `${k}:${v.sqm_low}-${v.sqm_high}sqm@$${v.avg_psf}`)
+          .join("  ");
+        process.stdout.write(`  ✓  avg $${row.latestPsf}psf${unitSummary ? "  " + unitSummary : ""}\n`);
         found++;
+        if (row.unitsJson) withUnits++;
       } else {
         process.stdout.write(`  —  no data\n`);
         noData++;
@@ -251,7 +300,7 @@ async function main() {
     }
 
     done++;
-    await sleep(300); // polite rate limit
+    await sleep(300);
   }
 
   // Final report
@@ -260,7 +309,7 @@ async function main() {
       COUNT(*) as total,
       SUM(CASE WHEN transaction_status='found'   THEN 1 ELSE 0 END) as found,
       SUM(CASE WHEN transaction_status='no_data' THEN 1 ELSE 0 END) as no_data,
-      SUM(CASE WHEN median_psf_12m > 0 THEN 1 ELSE 0 END) as has_psf,
+      SUM(CASE WHEN units_json IS NOT NULL        THEN 1 ELSE 0 END) as with_units,
       ROUND(AVG(CASE WHEN median_psf_12m > 0 THEN median_psf_12m END)) as avg_psf
     FROM private_project_tx_cache
   `)).rows[0];
@@ -272,9 +321,9 @@ async function main() {
   `)).rows[0].n;
 
   console.log(`\n══ TX Cache Seed Report ═══════════════════════════════════`);
-  console.log(`  This run       : ${done} processed  (✓ ${found}  — ${noData} no data  ✗ ${errors} errors)`);
-  console.log(`  Cache total    : ${s.total} rows  (${s.found} with PSF, ${s.no_data} no data)`);
-  console.log(`  Avg median PSF : S$${s.avg_psf ?? "—"}`);
+  console.log(`  This run      : ${done} (✓ ${found} found  ${withUnits} with unit data  — ${noData} no data  ✗ ${errors} errors)`);
+  console.log(`  Cache total   : ${s.total} rows  (${s.found} found  ${s.with_units} with units  ${s.no_data} no data)`);
+  console.log(`  Avg median PSF: S$${s.avg_psf ?? "—"}`);
   console.log(`  Still unchecked: ${unchecked}`);
   console.log("\n✓ Done");
   db.close();

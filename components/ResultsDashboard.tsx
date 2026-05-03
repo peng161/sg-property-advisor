@@ -14,6 +14,13 @@ const LeafletMap       = dynamic(() => import("./LeafletMap"),       { ssr: fals
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface UnitTypeData {
+  sqm_low:  number;
+  sqm_high: number;
+  avg_psf:  number;
+  count:    number;
+}
+
 export interface ExtendedProjectSummary {
   project:       string;
   street:        string;
@@ -32,6 +39,7 @@ export interface ExtendedProjectSummary {
   projectLat:     number | null;
   projectLng:     number | null;
   remainingLease: number | null;
+  units?:         Record<string, UnitTypeData>;
 }
 
 export interface EcSummary {
@@ -340,9 +348,14 @@ function PropertyCard({
 }) {
   const [selectedBr, setSelectedBr] = useState<BrId>(defaultBr);
 
-  const def = BR_DEFS.find((d) => d.id === selectedBr)!;
-  const estLow  = Math.round(listing.medianPsm * def.sqmLow);
-  const estHigh = Math.round(listing.medianPsm * def.sqmHigh);
+  const def     = BR_DEFS.find((d) => d.id === selectedBr)!;
+  const unitData = listing.units?.[selectedBr];
+  // Use per-condo unit data when available, else fall back to generic ranges + overall PSM
+  const sqmLow  = unitData?.sqm_low  ?? def.sqmLow;
+  const sqmHigh = unitData?.sqm_high ?? def.sqmHigh;
+  const unitPsm = unitData ? Math.round(unitData.avg_psf * 10.764) : listing.medianPsm;
+  const estLow  = Math.round(unitPsm * sqmLow);
+  const estHigh = Math.round(unitPsm * sqmHigh);
   const mortLow  = estimateMortgage(estLow);
   const mortHigh = estimateMortgage(estHigh);
   const suitability = familySuitability(selectedBr, numChildren);
@@ -402,20 +415,20 @@ function PropertyCard({
             <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Avg PSF</p>
-            <p className="text-sm font-bold text-slate-800">${fmt(toPsf(listing.medianPsm))}</p>
+            <p className="text-[9px] text-slate-400">{selectedBr} PSF{unitData ? "" : " (overall)"}</p>
+            <p className="text-sm font-bold text-slate-800">${fmt(toPsf(unitPsm))}</p>
           </div>
           <div>
             <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
             <p className={`text-sm font-bold ${trendCls}`}>{trend >= 0 ? "+" : ""}{trend.toFixed(1)}% {trend >= 0 ? "📈" : "📉"}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Est. Monthly Rental</p>
+            <p className="text-[9px] text-slate-400">Est. Monthly Mortgage</p>
             <p className="text-sm font-bold text-slate-800">{fmtK(mortLow)} – {fmtK(mortHigh)}</p>
           </div>
           <div>
-            <p className="text-[9px] text-slate-400">Size ({selectedBr})</p>
-            <p className="text-sm font-bold text-slate-700">{def.sqmLow}–{def.sqmHigh} sqm</p>
+            <p className="text-[9px] text-slate-400">Size ({selectedBr}){unitData ? "" : " ~est"}</p>
+            <p className="text-sm font-bold text-slate-700">{sqmLow}–{sqmHigh} sqm</p>
           </div>
           <div>
             <p className="text-[9px] text-slate-400">Transactions</p>
@@ -539,9 +552,9 @@ function PropertyCard({
           <div className="bg-slate-50 rounded-lg p-2 space-y-1 text-[10px] flex-1">
             <p className="font-semibold text-slate-600 text-[9px] uppercase tracking-wide mb-1.5">Quick Stats ({selectedBr})</p>
             {[
-              { label: "Est. Size", value: `${def.sqmLow} – ${def.sqmHigh} sqm` },
-              { label: "Avg PSF", value: `$${fmt(toPsf(listing.medianPsm))}` },
-              { label: "Est. Monthly Rental", value: `${fmtK(mortLow)} – ${fmtK(mortHigh)}` },
+              { label: `Est. Size${unitData ? "" : " ~est"}`, value: `${sqmLow} – ${sqmHigh} sqm` },
+              { label: `${selectedBr} PSF${unitData ? "" : " (overall)"}`, value: `$${fmt(toPsf(unitPsm))}` },
+              { label: "Est. Monthly Mortgage", value: `${fmtK(mortLow)} – ${fmtK(mortHigh)}` },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between">
                 <span className="text-slate-400">{label}</span>
@@ -573,8 +586,12 @@ function CompactListRow({
 }) {
   const [selectedBr, setSelectedBr] = useState<BrId>(defaultBr);
   const def        = BR_DEFS.find((d) => d.id === selectedBr)!;
-  const estLow     = Math.round(listing.medianPsm * def.sqmLow);
-  const estHigh    = Math.round(listing.medianPsm * def.sqmHigh);
+  const unitData   = listing.units?.[selectedBr];
+  const sqmLow     = unitData?.sqm_low  ?? def.sqmLow;
+  const sqmHigh    = unitData?.sqm_high ?? def.sqmHigh;
+  const unitPsm    = unitData ? Math.round(unitData.avg_psf * 10.764) : listing.medianPsm;
+  const estLow     = Math.round(unitPsm * sqmLow);
+  const estHigh    = Math.round(unitPsm * sqmHigh);
   const mortLow    = estimateMortgage(estLow);
   const mortHigh   = estimateMortgage(estHigh);
   const affordable  = estLow <= budget;
@@ -652,8 +669,8 @@ function CompactListRow({
               <p className="text-sm font-bold text-slate-800">{fmtM(estLow)} – {fmtM(estHigh)}</p>
             </div>
             <div>
-              <p className="text-[9px] text-slate-400">Avg PSF</p>
-              <p className="text-sm font-bold text-slate-800">${fmt(toPsf(listing.medianPsm))}</p>
+              <p className="text-[9px] text-slate-400">{selectedBr} PSF{unitData ? "" : " (overall)"}</p>
+              <p className="text-sm font-bold text-slate-800">${fmt(toPsf(unitPsm))}</p>
             </div>
             <div>
               <p className="text-[9px] text-slate-400">3Y PSF Trend</p>
@@ -662,12 +679,12 @@ function CompactListRow({
               </p>
             </div>
             <div>
-              <p className="text-[9px] text-slate-400">Est. Monthly</p>
+              <p className="text-[9px] text-slate-400">Est. Monthly Mortgage</p>
               <p className="text-sm font-bold text-slate-700">{fmtK(mortLow)} – {fmtK(mortHigh)}</p>
             </div>
             <div>
-              <p className="text-[9px] text-slate-400">Size ({selectedBr})</p>
-              <p className="text-sm font-bold text-slate-700">{def.sqmLow}–{def.sqmHigh} sqm</p>
+              <p className="text-[9px] text-slate-400">Size ({selectedBr}){unitData ? "" : " ~est"}</p>
+              <p className="text-sm font-bold text-slate-700">{sqmLow}–{sqmHigh} sqm</p>
             </div>
             <div>
               <p className="text-[9px] text-slate-400">Family Suitability</p>
