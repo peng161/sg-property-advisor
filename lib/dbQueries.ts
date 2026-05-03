@@ -139,8 +139,8 @@ function scoreWithTxData(
   let s = 30;
   const dist = distKm ?? 10;
   s += dist < 0.5 ? 30 : dist < 1 ? 26 : dist < 2 ? 22 : dist < 5 ? 16 : dist < 10 ? 10 : 5;
-  // Affordability: estimated 2BR price (55 sqm)
-  const est2BR = medianPsf * PSF_TO_PSM * 55;
+  // Affordability: estimated 2BR price (70 sqm — typical Singapore 2BR midpoint)
+  const est2BR = medianPsf * PSF_TO_PSM * 70;
   s += est2BR <= budget ? 18 : est2BR <= budget * 1.15 ? 10 : 3;
   // Trend
   s += trendLabel === "Rising" ? 12 : trendLabel === "Stable" ? 8 : trendLabel === "Softening" ? 2 : 4;
@@ -213,7 +213,7 @@ export async function getPrivateProjectsNearby(
         ? scoreWithTxData(medianPsf, txCount, trendLabel, budget, distKm, tenure, remainingLease)
         : distKm !== null ? scoreByDistance(distKm, tenure, remainingLease) : 50;
 
-      const est2BR = medianPsm > 0 ? medianPsm * 55 : 0;
+      const est2BR = medianPsm > 0 ? medianPsm * 70 : 0;
       return {
         project:       s(row.project_name),
         street:        s(row.address),

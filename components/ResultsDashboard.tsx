@@ -89,9 +89,9 @@ export interface DashboardProps {
 
 type BrId = "3BR" | "4BR" | "2BR" | "1BR";
 const BR_DEFS: { id: BrId; label: string; sqmLow: number; sqmHigh: number }[] = [
-  { id: "3BR", label: "3BR", sqmLow: 88,  sqmHigh: 108 },
-  { id: "4BR", label: "4BR", sqmLow: 115, sqmHigh: 140 },
-  { id: "2BR", label: "2BR", sqmLow: 60,  sqmHigh: 80  },
+  { id: "3BR", label: "3BR", sqmLow: 85,  sqmHigh: 104 },
+  { id: "4BR", label: "4BR", sqmLow: 115, sqmHigh: 135 },
+  { id: "2BR", label: "2BR", sqmLow: 59,  sqmHigh: 75  },
   { id: "1BR", label: "1BR", sqmLow: 42,  sqmHigh: 55  },
 ];
 
