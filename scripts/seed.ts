@@ -185,16 +185,27 @@ async function main() {
   const allRows = await downloadAndParseCsv(csvUrl);
   console.log(`  ${allRows.length} rows in date range\n`);
 
+  // Geocode at block level ("BLK 208 CLEMENTI AVE 6") for accurate proximity queries.
+  // Street-level geocoding assigns all blocks on a street the same centroid, causing
+  // blocks at one end to disappear from bounding-box queries when the user lives elsewhere.
+  const uniqueBlockStreets = [
+    ...new Set(allRows.map((r) => `BLK ${r.block} ${r.street_name}`)),
+  ];
+  // Also collect street-only keys as fallback for blocks that don't geocode
   const uniqueStreets = [...new Set(allRows.map((r) => r.street_name))];
-  console.log(`Geocoding ${uniqueStreets.length} unique streets…`);
-  const hdbGeo   = await geocodeBulk(uniqueStreets, 6, 250);
-  const geocoded = [...hdbGeo.values()].filter(Boolean).length;
-  console.log(`  Geocoded: ${geocoded}  Skipped: ${uniqueStreets.length - geocoded}\n`);
+
+  console.log(`Geocoding ${uniqueBlockStreets.length} unique blocks (+ ${uniqueStreets.length} street fallbacks)…`);
+  const blockGeo  = await geocodeBulk(uniqueBlockStreets, 6, 200);
+  const streetGeo = await geocodeBulk(uniqueStreets, 6, 200);
+  const blockGeocoded  = [...blockGeo.values()].filter(Boolean).length;
+  const streetGeocoded = [...streetGeo.values()].filter(Boolean).length;
+  console.log(`  Block-level: ${blockGeocoded}/${uniqueBlockStreets.length}  Street-level fallback: ${streetGeocoded}/${uniqueStreets.length}\n`);
 
   // Build insert statements
   const stmts: Parameters<typeof db.batch>[0] = [];
   for (const row of allRows) {
-    const precise  = hdbGeo.get(row.street_name);
+    const blockKey = `BLK ${row.block} ${row.street_name}`;
+    const precise  = blockGeo.get(blockKey) ?? streetGeo.get(row.street_name);
     const town     = (row.town ?? "").toUpperCase().trim();
     const fallback = TOWN_COORDS[town] ?? null;
     const coords   = precise ?? fallback;
