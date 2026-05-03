@@ -1373,52 +1373,75 @@ export default function ResultsDashboard({
 
             {/* ── HDB tab ── */}
             {propertyTab === "HDB" && (
-              <div className="p-5 space-y-5">
-                {/* Same flat type */}
-                <div>
-                  <p className="font-semibold text-slate-700 text-sm mb-3">
-                    Recent {flatType} Resale in {town || "your area"}
-                  </p>
-                  {sameTypeHdbListings.length > 0 ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {sameTypeHdbListings.map((t, i) => (
-                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                          <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
-                          <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
-                          <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm · {t.remainingLease}yr lease</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-slate-500 text-sm">No recent {flatType} transactions found in {town || "your area"}.</p>
-                  )}
+              <div className="flex flex-col lg:flex-row">
+                {/* Map — same layout as Condo tab */}
+                <div className="lg:w-[65%] border-b lg:border-b-0 lg:border-r border-slate-100" style={{ height: 520 }}>
+                  <MapWrapper
+                    lat={lat} lng={lng} postalCode={postalCode}
+                    properties={[]}
+                    selectedProject={null}
+                    onSelectProject={() => {}}
+                    radiusM={1500}
+                    bare
+                  />
                 </div>
 
-                {/* Bigger HDB */}
-                {nextFlatType && (
-                  <div>
-                    <p className="font-semibold text-slate-700 text-sm mb-3">
-                      Upgrade to {nextFlatType} in {town || "your area"}
+                {/* HDB listings — scrollable right panel */}
+                <div className="lg:w-[35%] overflow-y-auto" style={{ height: 520 }}>
+                  {/* Same flat type */}
+                  <div className="px-4 pt-4 pb-2 border-b border-slate-100">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                      Recent {flatType} Resale · {town || "your area"}
                     </p>
-                    {biggerHdbListings.length > 0 ? (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {biggerHdbListings.slice(0, 8).map((t, i) => (
-                          <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                            <p className="text-xs font-bold text-slate-700 truncate">Blk {t.block} {t.streetName.split(" ").slice(0, 3).join(" ")}</p>
-                            <p className="text-lg font-black text-indigo-600 mt-1">{fmtM(t.resalePrice)}</p>
-                            <p className="text-[10px] text-slate-400">${fmt(t.pricePerSqm)}/sqm · {t.storeyRange.replace(" TO ", "–")}F</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">{t.month} · {t.sqm}sqm</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-slate-500 text-sm">No recent transactions found. Enter a postal code for live data.</p>
-                    )}
                   </div>
-                )}
+                  {sameTypeHdbListings.length > 0 ? (
+                    sameTypeHdbListings.map((t, i) => (
+                      <div key={i} className="px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">Blk {t.block} {t.streetName}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{t.storeyRange.replace(" TO ", "–")}F · {t.sqm} sqm · {t.remainingLease}yr lease</p>
+                            <p className="text-[10px] text-slate-400">{t.month} · ${fmt(t.pricePerSqm)}/sqm</p>
+                          </div>
+                          <p className="text-base font-black text-indigo-600 shrink-0">{fmtM(t.resalePrice)}</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="px-4 py-4 text-sm text-slate-400">No recent {flatType} transactions found in {town || "your area"}.</p>
+                  )}
 
-                <p className="text-[9px] text-slate-400">Note: Prices are estimates based on latest available data. Actual figures may vary.</p>
+                  {/* Bigger flat type */}
+                  {nextFlatType && (
+                    <>
+                      <div className="px-4 pt-4 pb-2 border-b border-slate-100 bg-slate-50">
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                          Upgrade to {nextFlatType} · {town || "your area"}
+                        </p>
+                      </div>
+                      {biggerHdbListings.length > 0 ? (
+                        biggerHdbListings.slice(0, 8).map((t, i) => (
+                          <div key={i} className="px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">Blk {t.block} {t.streetName}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">{t.storeyRange.replace(" TO ", "–")}F · {t.sqm} sqm</p>
+                                <p className="text-[10px] text-slate-400">{t.month} · ${fmt(t.pricePerSqm)}/sqm</p>
+                              </div>
+                              <p className="text-base font-black text-indigo-600 shrink-0">{fmtM(t.resalePrice)}</p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="px-4 py-4 text-sm text-slate-400">No recent transactions found. Enter a postal code for live data.</p>
+                      )}
+                    </>
+                  )}
+
+                  <p className="px-4 py-3 text-[9px] text-slate-400 border-t border-slate-100">
+                    Prices based on latest available data. Actual figures may vary.
+                  </p>
+                </div>
               </div>
             )}
 
