@@ -8,6 +8,7 @@
  *   npm run research:tx-web                        # defaults to "TWIN VEW"
  *   npm run research:tx-web -- "Parc Riviera"
  *   npm run research:tx-web -- "TWIN VEW" --save   # writes data/<slug>.json
+ *   npm run research:tx-web -- "TWIN VEW" --type 3BR  # filter to 3BR units
  */
 
 import { config } from "dotenv";
@@ -17,10 +18,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
-const args    = process.argv.slice(2);
-const doSave  = args.includes("--save");
-const nameArg = args.filter((a) => !a.startsWith("--")).join(" ").trim();
-const PROJECT = nameArg || "TWIN VEW";
+const args     = process.argv.slice(2);
+const doSave   = args.includes("--save");
+const typeIdx  = args.indexOf("--type");
+const typeFilter = typeIdx !== -1 ? args[typeIdx + 1] : null;
+const nameArg  = args.filter((a) => !a.startsWith("--") && a !== args[typeIdx + 1]).join(" ").trim();
+const PROJECT  = nameArg || "TWIN VEW";
 
 const slug = PROJECT.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -40,7 +43,6 @@ async function fetchPage(url: string): Promise<string> {
     });
     if (!res.ok) return `HTTP ${res.status} for ${url}`;
     const html = await res.text();
-    // Strip scripts, styles, tags — keep visible text
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -89,12 +91,22 @@ export interface TxRecord {
   room_type:    string;
 }
 
+export interface UnitTypeStat {
+  count:       number;
+  psf_min:     number;
+  psf_max:     number;
+  psf_median:  number;
+  avg_price:   number;
+  sqft_range:  string;
+}
+
 export interface TransactionReport {
   project_name:  string;
   total_records: number;
   date_range:    { earliest: string; latest: string };
   psf_stats:     { min: number; max: number; mean: number; median: number };
   transactions:  TxRecord[];
+  by_unit_type:  Record<string, UnitTypeStat>;
   trend_summary: string;
   insights:      string[];
   data_source:   string;
@@ -110,14 +122,22 @@ async function runAgent(): Promise<TransactionReport> {
 
 Strategy:
 1. Try EdgeProp first — it has the most complete URA-sourced transaction history.
-   URL pattern: https://www.edgeprop.sg/condo/<slug>/transactions
+   URL pattern: https://www.edgeprop.sg/condo/${slug}/transactions
 2. If EdgeProp is behind a login or returns nothing useful, try 99.co:
-   URL pattern: https://www.99.co/singapore/condos-apartments/<slug>/past-transactions
-3. Also try SRX: https://www.srx.com.sg/condominium/<slug>/past-transaction
+   URL pattern: https://www.99.co/singapore/condos-apartments/${slug}/past-transactions
+3. Also try SRX: https://www.srx.com.sg/condominium/${slug}/past-transaction
 4. Try up to 5 different URLs total to gather data.
 
-Extract every transaction row you can find: date, price, area (sqft), PSF, floor, room type, sale type.
-Compute PSF yourself if the page shows price + area but not PSF.
+For EVERY transaction row, extract:
+- date (YYYY-MM)
+- price in SGD
+- area in sqft (convert sqm × 10.764 if needed)
+- PSF (compute from price / area if not shown)
+- floor range (e.g. "06-10")
+- room_type / unit type (e.g. "1 Bedroom", "2 Bedroom", "3 Bedroom", "4 Bedroom", "5 Bedroom", "Studio", "Penthouse")
+- type_of_sale (New Sale / Sub Sale / Resale)
+
+Also compute a by_unit_type breakdown: for each distinct room_type, compute count, psf_min, psf_max, psf_median, avg_price, sqft_range (e.g. "904–1033").
 
 Return ONLY valid JSON — no prose, no markdown fences.`;
 
@@ -144,6 +164,16 @@ After fetching pages, return EXACTLY this JSON (no other text):
       "room_type": "<e.g. 3 Bedroom or unknown>"
     }
   ],
+  "by_unit_type": {
+    "<room_type>": {
+      "count": <int>,
+      "psf_min": <int>,
+      "psf_max": <int>,
+      "psf_median": <int>,
+      "avg_price": <int>,
+      "sqft_range": "<e.g. 904-1033>"
+    }
+  },
   "trend_summary": "<2-3 sentences on PSF trend over time>",
   "insights": [
     "<insight 1>",
@@ -154,7 +184,7 @@ After fetching pages, return EXACTLY this JSON (no other text):
   "fetched_at": "${new Date().toISOString()}"
 }
 
-If no transaction records are found at all, still return the JSON with total_records: 0 and empty transactions array, but fill trend_summary and insights with whatever context you could gather (launch price, current asking price, development info).`;
+If no transaction records are found at all, still return the JSON with total_records: 0 and empty transactions array, but fill trend_summary and insights with whatever context you could gather (launch price, current asking price, development info). Set by_unit_type to {}.`;
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userMsg }];
 
@@ -177,15 +207,19 @@ If no transaction records are found at all, still return the JSON with total_rec
         .join("");
       const m = text.match(/\{[\s\S]*\}/);
       if (m) {
-        try { return JSON.parse(m[0]) as TransactionReport; } catch { /* fall through */ }
+        try {
+          const report = JSON.parse(m[0]) as TransactionReport;
+          if (!report.by_unit_type) report.by_unit_type = computeByUnitType(report.transactions);
+          return report;
+        } catch { /* fall through */ }
       }
-      // Return whatever text Claude produced as the summary
       return {
         project_name:  PROJECT,
         total_records: 0,
         date_range:    { earliest: "—", latest: "—" },
         psf_stats:     { min: 0, max: 0, mean: 0, median: 0 },
         transactions:  [],
+        by_unit_type:  {},
         trend_summary: text.trim().slice(0, 500),
         insights:      [],
         data_source:   "web (no structured data extracted)",
@@ -213,6 +247,7 @@ If no transaction records are found at all, still return the JSON with total_rec
     date_range:    { earliest: "—", latest: "—" },
     psf_stats:     { min: 0, max: 0, mean: 0, median: 0 },
     transactions:  [],
+    by_unit_type:  {},
     trend_summary: "Agent did not return a structured result.",
     insights:      [],
     data_source:   "—",
@@ -220,25 +255,86 @@ If no transaction records are found at all, still return the JSON with total_rec
   };
 }
 
+// ── Fallback: compute by_unit_type from raw transactions ──────────────────────
+
+function median(nums: number[]): number {
+  if (!nums.length) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
+function computeByUnitType(txs: TxRecord[]): Record<string, UnitTypeStat> {
+  const groups: Record<string, TxRecord[]> = {};
+  for (const t of txs) {
+    const key = t.room_type || "unknown";
+    (groups[key] ??= []).push(t);
+  }
+  const out: Record<string, UnitTypeStat> = {};
+  for (const [key, rows] of Object.entries(groups)) {
+    const psfs   = rows.map((r) => r.psf).filter((p) => p > 0);
+    const prices = rows.map((r) => r.price_sgd).filter((p) => p > 0);
+    const areas  = rows.map((r) => r.area_sqft).filter((a) => a > 0);
+    out[key] = {
+      count:      rows.length,
+      psf_min:    psfs.length  ? Math.min(...psfs)  : 0,
+      psf_max:    psfs.length  ? Math.max(...psfs)  : 0,
+      psf_median: median(psfs),
+      avg_price:  prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0,
+      sqft_range: areas.length  ? `${Math.min(...areas)}–${Math.max(...areas)}` : "—",
+    };
+  }
+  return out;
+}
+
 // ── Printer ───────────────────────────────────────────────────────────────────
 
-function printReport(r: TransactionReport) {
+function printReport(r: TransactionReport, filterType: string | null) {
   const hr = "─".repeat(70);
+  let txs = r.transactions;
+  if (filterType) {
+    txs = txs.filter((t) => t.room_type.toLowerCase().includes(filterType.toLowerCase()));
+  }
+
   console.log(`\n${"═".repeat(70)}`);
   console.log(`  ${r.project_name} — Transaction History (web-scraped)`);
+  if (filterType) console.log(`  [Filtered to: ${filterType}]`);
   console.log(`${"═".repeat(70)}`);
-  console.log(`  Records      : ${r.total_records}`);
+  console.log(`  Total records: ${r.total_records}${filterType ? ` (showing ${txs.length} for ${filterType})` : ""}`);
   console.log(`  Date range   : ${r.date_range.earliest} → ${r.date_range.latest}`);
   if (r.psf_stats.median > 0) {
     console.log(`  PSF range    : S$${r.psf_stats.min} – S$${r.psf_stats.max}`);
     console.log(`  PSF median   : S$${r.psf_stats.median}  |  mean: S$${r.psf_stats.mean}`);
   }
-  console.log(hr);
 
-  if (r.transactions.length) {
-    console.log("  Date      Price (S$)  Area(sqft)  PSF    Sale Type     Floor       Rooms");
+  // Unit type breakdown
+  if (Object.keys(r.by_unit_type).length > 0) {
+    console.log(`\n${hr}`);
+    console.log("  By Unit Type:");
+    console.log(`  ${"Type".padEnd(18)} ${"Count".padStart(5)}  ${"PSF Min".padStart(7)}  ${"PSF Max".padStart(7)}  ${"PSF Med".padStart(7)}  ${"Avg Price".padStart(12)}  SqFt Range`);
+    console.log(`  ${"─".repeat(67)}`);
+    const sorted = Object.entries(r.by_unit_type).sort((a, b) => {
+      const order = ["Studio", "1 Bedroom", "2 Bedroom", "3 Bedroom", "4 Bedroom", "5 Bedroom", "Penthouse", "unknown"];
+      return (order.indexOf(a[0]) ?? 99) - (order.indexOf(b[0]) ?? 99);
+    });
+    for (const [type, s] of sorted) {
+      const highlight = filterType && type.toLowerCase().includes(filterType.toLowerCase()) ? " ◀" : "";
+      console.log(
+        `  ${type.padEnd(18)} ${String(s.count).padStart(5)}  ` +
+        `${("S$"+s.psf_min).padStart(7)}  ` +
+        `${("S$"+s.psf_max).padStart(7)}  ` +
+        `${("S$"+s.psf_median).padStart(7)}  ` +
+        `${("S$"+s.avg_price.toLocaleString()).padStart(12)}  ` +
+        `${s.sqft_range}${highlight}`
+      );
+    }
+  }
+
+  if (txs.length) {
+    console.log(`\n${hr}`);
+    console.log("  Date      Price (S$)  Area(sqft)    PSF  Sale Type     Floor       Rooms");
     console.log(hr);
-    r.transactions.slice(0, 50).forEach((t) => {
+    txs.slice(0, 50).forEach((t) => {
       console.log(
         `  ${t.date}  ` +
         `${String(t.price_sgd.toLocaleString()).padStart(10)}  ` +
@@ -248,11 +344,11 @@ function printReport(r: TransactionReport) {
         `${t.floor_range.padEnd(10)}  ${t.room_type}`
       );
     });
-    if (r.transactions.length > 50) {
-      console.log(`  … and ${r.transactions.length - 50} more (see saved JSON)`);
+    if (txs.length > 50) {
+      console.log(`  … and ${txs.length - 50} more (use --save to get full JSON)`);
     }
   } else {
-    console.log("  No individual transaction rows extracted.");
+    console.log("\n  No individual transaction rows extracted.");
   }
 
   console.log(hr);
@@ -272,10 +368,10 @@ async function main() {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error("✗ ANTHROPIC_API_KEY must be set"); process.exit(1);
   }
-  console.log(`\nResearching (web agent): "${PROJECT}"\n`);
+  console.log(`\nResearching (web agent): "${PROJECT}"${typeFilter ? ` [unit type: ${typeFilter}]` : ""}\n`);
 
   const report = await runAgent();
-  printReport(report);
+  printReport(report, typeFilter);
 
   if (doSave) {
     const outDir = join(process.cwd(), "data");
