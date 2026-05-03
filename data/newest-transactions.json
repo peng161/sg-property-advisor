@@ -1,0 +1,20 @@
+{
+  "project_name": "NEWest",
+  "name_used_in_db": "NEWest",
+  "total_records": 0,
+  "date_range": {
+    "earliest": "—",
+    "latest": "—"
+  },
+  "psf_stats": {
+    "min": 0,
+    "max": 0,
+    "mean": 0,
+    "median": 0
+  },
+  "transactions": [],
+  "trend_summary": "See raw transactions above.",
+  "insights": [],
+  "data_source": "data.gov.sg URA REALIS (fallback — Claude did not return JSON)",
+  "fetched_at": "2026-04-27T16:47:03.484Z"
+}

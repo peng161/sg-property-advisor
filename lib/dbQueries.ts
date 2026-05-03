@@ -4,8 +4,21 @@
  */
 
 import { getDb } from "./sqlite";
-import type { HdbResaleRecord } from "./fetchHdb";
 import type { ExtendedProjectSummary } from "@/components/ResultsDashboard";
+
+export interface HdbResaleRecord {
+  block:             string;
+  streetName:        string;
+  town:              string;
+  flatType:          string;
+  storeyRange:       string;
+  sqm:               number;
+  resalePrice:       number;
+  pricePerSqm:       number;
+  month:             string;
+  leaseCommenceYear: number;
+  remainingLease:    number;
+}
 
 const NEARBY_DIST_KM = 1.5;
 
@@ -349,8 +362,6 @@ export async function getPrivateDemandMetrics(
 }
 
 // ── HDB town prices ───────────────────────────────────────────────────────────
-// Returns median resale price per display flat type for a town, from recent
-// DB transactions. Replaces the data.gov.sg fetchHdbPrices() call.
 
 export async function getHdbPricesByTown(
   town: string,
@@ -394,8 +405,6 @@ export async function getHdbPricesByTown(
 }
 
 // ── HDB lease year from block ─────────────────────────────────────────────────
-// Returns lease commencement year for a specific block from the DB.
-// Replaces the data.gov.sg fetchHdbBlockLeaseYear() call.
 
 export async function getHdbLeaseYear(
   block: string,

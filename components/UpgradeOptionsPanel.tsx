@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { UpgradeOption } from "@/lib/calculator";
-import type { HdbResaleRecord } from "@/lib/fetchHdb";
+import type { HdbResaleRecord } from "@/lib/dbQueries";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

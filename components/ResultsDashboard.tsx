@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { UpgradeOption, AssessmentResult } from "@/lib/calculator";
 import type { AreaCondoProperty } from "@/app/api/area-condos/route";
-import type { HdbResaleRecord } from "@/lib/fetchHdb";
+import type { HdbResaleRecord } from "@/lib/dbQueries";
 import type { FinancialProfile } from "@/lib/myinfo/types";
 import FinancialProfilePanel from "./FinancialProfilePanel";
 import UpgradeScorePanel from "./UpgradeScorePanel";

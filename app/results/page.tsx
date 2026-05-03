@@ -1,5 +1,5 @@
 import { assess } from "@/lib/calculator";
-import type { HdbResaleRecord } from "@/lib/fetchHdb";
+import type { HdbResaleRecord } from "@/lib/dbQueries";
 import { EC_OPTIONS } from "@/lib/mockData";
 import { geocodePostal } from "@/lib/geocode";
 import ResultsDashboard from "@/components/ResultsDashboard";

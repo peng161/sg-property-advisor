@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { HdbResaleRecord } from "@/lib/fetchHdb";
+import type { HdbResaleRecord } from "@/lib/dbQueries";
 
 interface Props {
   transactions:      HdbResaleRecord[];
