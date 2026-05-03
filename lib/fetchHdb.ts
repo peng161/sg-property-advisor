@@ -47,13 +47,13 @@ function median(values: number[]): number {
 
 interface RawRow { [key: string]: string }
 
-async function tryDataGovCkan(town: string, flatType: string): Promise<RawRow[]> {
+async function tryDataGovCkan(town: string, flatType: string, limit = 500): Promise<RawRow[]> {
   const filters = encodeURIComponent(
     JSON.stringify({ town: town.toUpperCase(), flat_type: flatType })
   );
   const url =
     `https://data.gov.sg/api/action/datastore_search` +
-    `?resource_id=${RESOURCE_ID}&limit=500&filters=${filters}&sort=month%20desc`;
+    `?resource_id=${RESOURCE_ID}&limit=${limit}&filters=${filters}&sort=month%20desc`;
   const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) throw new Error(`CKAN ${res.status}`);
   const json = await res.json();
@@ -62,10 +62,10 @@ async function tryDataGovCkan(town: string, flatType: string): Promise<RawRow[]>
   return rows;
 }
 
-async function tryDataGovV2(town: string, flatType: string): Promise<RawRow[]> {
+async function tryDataGovV2(town: string, flatType: string, limit = 500): Promise<RawRow[]> {
   // data.gov.sg v2 API — filter via query params
   const params = new URLSearchParams({
-    limit:     "500",
+    limit:     String(limit),
     town:      town.toUpperCase(),
     flat_type: flatType,
   });
@@ -102,9 +102,9 @@ function rawRowToRecord(r: RawRow): HdbResaleRecord | null {
   };
 }
 
-async function fetchRows(town: string, flatType: string): Promise<RawRow[]> {
-  try { return await tryDataGovCkan(town, flatType); } catch { /* fall through */ }
-  try { return await tryDataGovV2(town, flatType);   } catch { /* fall through */ }
+async function fetchRows(town: string, flatType: string, limit = 500): Promise<RawRow[]> {
+  try { return await tryDataGovCkan(town, flatType, limit); } catch { /* fall through */ }
+  try { return await tryDataGovV2(town, flatType, limit);   } catch { /* fall through */ }
   return [];
 }
 
@@ -197,8 +197,10 @@ export async function fetchHdbTransactions(
     ? [[flatType, FLAT_TYPE_API[flatType] ?? flatType] as [string, string]]
     : Object.entries(FLAT_TYPE_API);
 
+  // 2000 per flat type so busy towns surface transactions from all streets,
+  // not just whichever street was most recently active
   const allRows = (
-    await Promise.all(typesToFetch.map(([, apiFlat]) => fetchRows(town, apiFlat)))
+    await Promise.all(typesToFetch.map(([, apiFlat]) => fetchRows(town, apiFlat, 2000)))
   ).flat();
 
   const records = allRows
