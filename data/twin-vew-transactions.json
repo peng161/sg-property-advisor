@@ -1,0 +1,24 @@
+{
+  "project_name": "TWIN VEW",
+  "total_records": 0,
+  "date_range": {
+    "earliest": "2018-05",
+    "latest": "2026-03"
+  },
+  "psf_stats": {
+    "min": 1214,
+    "max": 2050,
+    "mean": 1886,
+    "median": 1886
+  },
+  "transactions": [],
+  "trend_summary": "Twin Vew's PSF has risen sharply from a low of S$1,214 psf in May 2018 (early launch period) to a high of S$2,050 psf in March 2026, reflecting strong appreciation since TOP in 2021. Over the last 12 months, sale prices have ranged from S$1,699 to S$2,050 psf, averaging S$1,886 psf — a roughly 55-70% gain from initial launch pricing. The project has clearly benefited from the maturing Clementi/West Coast precinct and proximity to the upcoming Jurong Lake District.",
+  "insights": [
+    "Twin Vew is a 520-unit, 99-year leasehold development by CSC Land Group, completed in 2021 on a 12,343 sqm site along West Coast Vale in District 5.",
+    "Buyer profile skews heavily Singaporean (83.5%) with PRs at 15.3% and foreigners at just 1.2%, suggesting an owner-occupier dominated estate that should support price stability.",
+    "Current rental yield of ~3.7% (avg S$5.80 psf pm) is healthy for a District 5 condo and is supported by proximity to Clementi MRT, Jurong East MRT and the future second CBD at Jurong Lake District.",
+    "Detailed unit-level transaction rows were not accessible — EdgeProp gates the full transaction table behind a login, and 99.co/SRX returned HTTP 403. Aggregate stats above are sourced from EdgeProp's URA-derived summary."
+  ],
+  "data_source": "EdgeProp (aggregate stats only; unit-level rows behind login). 99.co and SRX returned 403.",
+  "fetched_at": "2026-05-03T07:00:16.453Z"
+}
